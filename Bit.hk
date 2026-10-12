@@ -2,17 +2,73 @@
 -> name        => h2d
 -> version     => 0.1.0
 -> description => 2D game engine for H#. Primary engine: real windowed/GPU graphics via SDL2 (h2d_gfx/h2d_texture/h2d_input2d/h2d_audio2/...). Also includes the original character-grid ANSI truecolor text engine (h2d_canvas/h2d_entity/...), kept for turn-based games.
--> author      => Bytes Developers
+-> authors     => ["Bit Developers"]
 -> license     => MIT
+-> lang        => h#
+
+[edition]
+-> edition => 2026
+
+[layout]
+-> src => src
 
 [build]
--> lang   => h#
--> entry  => src/lib.h#
--> output => build/libh2d
--> emit   => lib
+-> link => static
 
-[deps]
--> sdl2        => dynamic
--> SDL2_image  => dynamic
--> SDL2_mixer  => dynamic
--> SDL2_gfx    => dynamic
+[lib]
+-> output => hlib
+
+! `bit pack` -> dist/h2d-<version>-<platform>.bit (SquashFS, compiled hlib inside) — attach it to the GitHub release
+[pack]
+-> contents    => [hlib, sources, docs]
+-> compression => zstd
+
+[dependencies]
+
+! the C shim around SDL2 (native/h2d_native.c) is compiled together with the library
+[native-sources]
+-> c      => [native/h2d_native.c]
+-> flags  => -O2 -Wall
+
+! SDL2 and friends: `bit system check` / `bit system install`
+[system-dependencies]
+-> sdl2
+--> pkg-config => sdl2
+--> header => SDL2/SDL.h
+--> lib => SDL2
+--> apt => libsdl2-dev
+--> dnf => SDL2-devel
+--> pacman => sdl2
+--> apk => sdl2-dev
+--> zypper => libSDL2-devel
+--> brew => sdl2
+-> SDL2_image
+--> pkg-config => SDL2_image
+--> header => SDL2/SDL_image.h
+--> lib => SDL2_image
+--> apt => libsdl2-image-dev
+--> dnf => SDL2_image-devel
+--> pacman => sdl2_image
+--> apk => sdl2_image-dev
+--> zypper => libSDL2_image-devel
+--> brew => sdl2_image
+-> SDL2_mixer
+--> pkg-config => SDL2_mixer
+--> header => SDL2/SDL_mixer.h
+--> lib => SDL2_mixer
+--> apt => libsdl2-mixer-dev
+--> dnf => SDL2_mixer-devel
+--> pacman => sdl2_mixer
+--> apk => sdl2_mixer-dev
+--> zypper => libSDL2_mixer-devel
+--> brew => sdl2_mixer
+-> SDL2_gfx
+--> pkg-config => SDL2_gfx
+--> header => SDL2/SDL2_gfxPrimitives.h
+--> lib => SDL2_gfx
+--> apt => libsdl2-gfx-dev
+--> dnf => SDL2_gfx-devel
+--> pacman => sdl2_gfx
+--> apk => sdl2_gfx-dev
+--> zypper => libSDL2_gfx-devel
+--> brew => sdl2_gfx
