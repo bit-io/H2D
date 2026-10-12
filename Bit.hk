@@ -18,19 +18,16 @@
 [lib]
 -> output => hlib
 
-! `bit pack` -> dist/h2d-<version>-<platform>.bit (SquashFS, compiled hlib inside) — attach it to the GitHub release
 [pack]
 -> contents    => [hlib, sources, docs]
 -> compression => zstd
 
 [dependencies]
 
-! the C shim around SDL2 (native/h2d_native.c) is compiled together with the library
 [native-sources]
 -> c      => [native/h2d_native.c]
 -> flags  => -O2 -Wall
 
-! SDL2 and friends: `bit system check` / `bit system install`
 [system-dependencies]
 -> sdl2
 --> pkg-config => sdl2
