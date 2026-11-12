@@ -45,3 +45,20 @@ end
 pub fn shutdown(app: App2D) is
     h2d_gfx::close_window()
 end
+
+;; Like new_app2d, but the game draws in a fixed virtual resolution
+;; (virtual_w x virtual_h) that is scaled + letterboxed into a resizable
+;; window of window_w x window_h. `integer_scale` keeps pixels square and
+;; crisp. screen_width()/screen_height() and the mouse then use the virtual
+;; size, and the camera is centred on it.
+pub fn new_app2d_virtual(virtual_w: int, virtual_h: int, window_w: int, window_h: int, title: string, target_fps: int, integer_scale: bool) -> App2D is
+    h2d_gfx::init_window(window_w, window_h, title)
+    h2d_gfx::set_target_fps(target_fps)
+    h2d_gfx::set_logical_size(virtual_w, virtual_h)
+    h2d_gfx::set_integer_scale(integer_scale)
+    return App2D {
+        world: h2d_entity2d::new_world2d(),
+        camera: h2d_camera2d::new_camera2d_centered(virtual_w, virtual_h),
+        running: true,
+    }
+end
