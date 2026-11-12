@@ -9,7 +9,7 @@ mod h2d_color
 ;; comment), load_texture here goes through SDL_image and accepts PNG,
 ;; JPEG, BMP, GIF, and more — use real art assets, not just BMP.
 
-extern dynamic [c, "h2d_native"] is
+extern static [c, "h2d_native"] is
     fn h2d_load_texture(path: string) -> int
     fn h2d_load_texture_from_rgba(pixels: bytes, width: int, height: int) -> int
     fn h2d_unload_texture(handle: int)
@@ -75,11 +75,7 @@ end
 ;; center, which is what you want for most game entities — optional
 ;; horizontal/vertical mirroring, and a tint. Rotation/flip cost
 ;; nothing extra: this is a single GPU blit either way.
-pub fn draw_texture_ex(
-    tex: Texture2D, x: f64, y: f64, dst_w: f64, dst_h: f64,
-    rotation_deg: f64, origin_x: f64, origin_y: f64,
-    flip_h: bool, flip_v: bool, tint: h2d_color::Color
-) is
+pub fn draw_texture_ex(tex: Texture2D, x: f64, y: f64, dst_w: f64, dst_h: f64, rotation_deg: f64, origin_x: f64, origin_y: f64, flip_h: bool, flip_v: bool, tint: h2d_color::Color) is
     let fh: int = if flip_h then 1 else 0
     let fv: int = if flip_v then 1 else 0
     h2d_draw_texture_ex(tex.handle, x, y, dst_w, dst_h, rotation_deg, origin_x, origin_y, fh, fv, tint.r, tint.g, tint.b, tint.a)
@@ -89,9 +85,94 @@ end
 ;; stretched to (dst_w, dst_h) at (x, y) — the primitive a sprite-sheet
 ;; / texture-atlas animation is built from (see h2d_anim2d.h#, which
 ;; wraps exactly this).
-pub fn draw_texture_rec(
-    tex: Texture2D, src_x: f64, src_y: f64, src_w: f64, src_h: f64,
-    x: f64, y: f64, dst_w: f64, dst_h: f64, tint: h2d_color::Color
-) is
+pub fn draw_texture_rec(tex: Texture2D, src_x: f64, src_y: f64, src_w: f64, src_h: f64, x: f64, y: f64, dst_w: f64, dst_h: f64, tint: h2d_color::Color) is
     h2d_draw_texture_rec(tex.handle, src_x, src_y, src_w, src_h, x, y, dst_w, dst_h, tint.r, tint.g, tint.b, tint.a)
+end
+
+;; ── 0.3.0: flips + source rect in one call, filtering, render targets ──
+
+extern dynamic [c, "h2d_native"] is
+    fn h2d_draw_texture_full(handle: int, src_x: f64, src_y: f64, src_w: f64, src_h: f64, x: f64, y: f64, dst_w: f64, dst_h: f64, rotation_deg: f64, origin_x: f64, origin_y: f64, flip_h: int, flip_v: int, r: int, g: int, b: int, a: int)
+    fn h2d_set_texture_filter(linear: int)
+    fn h2d_create_render_texture(width: int, height: int) -> int
+    fn h2d_begin_texture_mode(handle: int)
+    fn h2d_end_texture_mode()
+end
+
+;; Source rectangle + destination + rotation + origin + flips + tint: the
+;; one call a sprite-sheet character that turns left/right needs.
+pub fn draw_texture_full(tex: Texture2D, src_x: f64, src_y: f64, src_w: f64, src_h: f64, x: f64, y: f64, dst_w: f64, dst_h: f64, rotation_deg: f64, origin_x: f64, origin_y: f64, flip_h: bool, flip_v: bool, tint: h2d_color::Color) is
+    let fh: int = if flip_h then 1 else 0
+    let fv: int = if flip_v then 1 else 0
+    h2d_draw_texture_full(tex.handle, src_x, src_y, src_w, src_h, x, y, dst_w, dst_h, rotation_deg, origin_x, origin_y, fh, fv, tint.r, tint.g, tint.b, tint.a)
+end
+
+;; false (default) = nearest-neighbour: crisp pixel art. true = smooth
+;; scaling. Applies to textures loaded AFTER the call.
+pub fn set_filter_linear(linear: bool) is
+    h2d_set_texture_filter(if linear then 1 else 0)
+end
+
+;; An empty off-screen texture you can draw into (minimap, lighting mask,
+;; post-effects): begin_texture_mode(t) ... draw ... end_texture_mode(),
+;; then draw `t` like any texture. Contents are undefined until drawn into.
+pub fn create_render_texture(width: int, height: int) -> Texture2D is
+    let h: int = h2d_create_render_texture(width, height)
+    if h == 0 is
+        return Texture2D { handle: 0, width: 0, height: 0 }
+    end
+    return Texture2D { handle: h, width: width, height: height }
+end
+
+pub fn begin_texture_mode(tex: Texture2D) is
+    h2d_begin_texture_mode(tex.handle)
+end
+
+pub fn end_texture_mode() is
+    h2d_end_texture_mode()
+end
+
+;; Same as load_texture_from_rgba, but from an ordinary [int] of bytes
+;; (each 0..255, r,g,b,a per pixel, row by row) — convenient for sprites
+;; and tiles generated in code with no image files at all.
+pub fn load_texture_from_ints(rgba: [int], width: int, height: int) -> Texture2D is
+    return load_texture_from_rgba(__builtin_bytes_from_ints(rgba), width, height)
+end
+
+;; Builds a sprite/tile sheet from ASCII art: every string is one pixel row,
+;; every character a colour looked up in `legend` (one char of `legend_chars`
+;; per entry of `palette`); other characters are transparent. All rows must
+;; have the same length. Lets a game ship with zero image assets.
+pub fn load_texture_from_art(rows: [string], legend_chars: string, palette: [h2d_color::Color]) -> Texture2D is
+    let h: int = rows.len()
+    if h == 0 is return Texture2D { handle: 0, width: 0, height: 0 } end
+    let w: int = rows[0].len()
+    let mut px: [int] = []
+    let mut y: int = 0
+    while y < h is
+        let mut x: int = 0
+        while x < w is
+            let ch: string = if x < rows[y].len() then rows[y][x..x + 1] else " "
+            let mut idx: int = 0 - 1
+            let mut k: int = 0
+            while k < legend_chars.len() is
+                if legend_chars[k..k + 1] == ch is idx = k end
+                k += 1
+            end
+            if idx >= 0 && idx < palette.len() is
+                px.push(palette[idx].r)
+                px.push(palette[idx].g)
+                px.push(palette[idx].b)
+                px.push(palette[idx].a)
+            else is
+                px.push(0)
+                px.push(0)
+                px.push(0)
+                px.push(0)
+            end
+            x += 1
+        end
+        y += 1
+    end
+    return load_texture_from_ints(px, w, h)
 end
