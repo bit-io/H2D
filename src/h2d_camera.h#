@@ -1,0 +1,37 @@
+pub struct Camera is
+    pub x:      int   ;; world cell shown at the viewport's top-left corner
+    pub y:      int
+    pub width:  int   ;; viewport size in cells
+    pub height: int
+end
+
+pub fn new_camera(width: int, height: int) -> Camera is
+    return Camera { x: 0, y: 0, width: width, height: height }
+end
+
+fn clamp(v: int, lo: int, hi: int) -> int is
+    if v < lo is return lo end
+    if v > hi is return hi end
+    return v
+end
+
+;; Centres the viewport on (tx, ty), clamped to a world of world_w x world_h cells.
+pub fn follow(mut cam: Camera, tx: int, ty: int, world_w: int, world_h: int) -> Camera is
+    let maxx: int = if world_w > cam.width then world_w - cam.width else 0
+    let maxy: int = if world_h > cam.height then world_h - cam.height else 0
+    cam.x = clamp(tx - cam.width / 2, 0, maxx)
+    cam.y = clamp(ty - cam.height / 2, 0, maxy)
+    return cam
+end
+
+pub fn to_screen_x(cam: Camera, wx: int) -> int is
+    return wx - cam.x
+end
+
+pub fn to_screen_y(cam: Camera, wy: int) -> int is
+    return wy - cam.y
+end
+
+pub fn is_visible(cam: Camera, wx: int, wy: int) -> bool is
+    return wx >= cam.x && wy >= cam.y && wx < cam.x + cam.width && wy < cam.y + cam.height
+end
