@@ -1,0 +1,36 @@
+pub struct Anim is
+    pub frames:     [string]   ;; one glyph / short string per frame
+    pub frame_ms:   int
+    pub elapsed_ms: int
+    pub current:    int
+    pub looping:    bool
+    pub finished:   bool
+end
+
+pub fn new_anim(frames: [string], frame_ms: int, looping: bool) -> Anim is
+    return Anim { frames: frames, frame_ms: frame_ms, elapsed_ms: 0, current: 0, looping: looping, finished: false }
+end
+
+pub fn update(mut a: Anim, dt_ms: int) -> Anim is
+    if a.finished || a.frame_ms <= 0 || a.frames.len() == 0 is return a end
+    a.elapsed_ms += dt_ms
+    while a.elapsed_ms >= a.frame_ms is
+        a.elapsed_ms -= a.frame_ms
+        a.current += 1
+        if a.current >= a.frames.len() is
+            if a.looping is
+                a.current = 0
+            else is
+                a.current = a.frames.len() - 1
+                a.finished = true
+                return a
+            end
+        end
+    end
+    return a
+end
+
+pub fn current_frame(a: Anim) -> string is
+    if a.frames.len() == 0 is return "" end
+    return a.frames[a.current]
+end
