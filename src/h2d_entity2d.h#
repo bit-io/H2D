@@ -1,6 +1,7 @@
 mod h2d_vec2
 mod h2d_color
 mod h2d_texture
+mod h2d_camera2d
 
 ;; Pixel-space entity/world for h2d_gfx's graphics engine — the
 ;; counterpart to h2d_entity.h#'s grid-cell Entity/World for the text
@@ -137,6 +138,83 @@ pub fn draw_all(world: World2D) is
                 e.rotation, e.width / 2.0, e.height / 2.0,
                 false, false, e.tint
             )
+        end
+        i += 1
+    end
+end
+
+;; ── 0.3.0 ───────────────────────────────────────────────────────────────
+
+;; despawn() only marks entities dead (so indices stay valid during a
+;; frame). Call compact() once per frame/level AFTER you are done with
+;; indices to really remove them — otherwise a bullet-heavy game leaks.
+pub fn compact(mut world: World2D) -> World2D is
+    let mut kept: [Entity2D] = []
+    let mut i: int = 0
+    while i < world.entities.len() is
+        if world.entities[i].alive is kept.push(world.entities[i]) end
+        i += 1
+    end
+    world.entities = kept
+    return world
+end
+
+pub fn alive_count(world: World2D) -> int is
+    let mut n: int = 0
+    let mut i: int = 0
+    while i < world.entities.len() is
+        if world.entities[i].alive is n += 1 end
+        i += 1
+    end
+    return n
+end
+
+;; Do two entities' draw rectangles (pos + width/height) overlap?
+pub fn overlaps(a: Entity2D, b: Entity2D) -> bool is
+    return a.pos.x < b.pos.x + b.width && a.pos.x + a.width > b.pos.x && a.pos.y < b.pos.y + b.height && a.pos.y + a.height > b.pos.y
+end
+
+;; Indices of alive entities with `tag` that overlap the rectangle.
+pub fn indices_overlapping_rect(world: World2D, tag: string, x: f64, y: f64, w: f64, h: f64) -> [int] is
+    let mut out: [int] = []
+    let mut i: int = 0
+    while i < world.entities.len() is
+        let e: Entity2D = world.entities[i]
+        if e.alive && e.tag == tag && e.pos.x < x + w && e.pos.x + e.width > x && e.pos.y < y + h && e.pos.y + e.height > y is
+            out.push(i)
+        end
+        i += 1
+    end
+    return out
+end
+
+pub fn set_rotation_index(mut world: World2D, index: int, degrees: f64) -> World2D is
+    world.entities[index].rotation = degrees
+    return world
+end
+
+pub fn set_tint_index(mut world: World2D, index: int, tint: h2d_color::Color) -> World2D is
+    world.entities[index].tint = tint
+    return world
+end
+
+pub fn set_size_index(mut world: World2D, index: int, w: f64, h: f64) -> World2D is
+    world.entities[index].width = w
+    world.entities[index].height = h
+    return world
+end
+
+;; Like draw_all, but through a camera (position and size follow pan/zoom;
+;; entities completely off screen are skipped).
+pub fn draw_all_cam(world: World2D, cam: h2d_camera2d::Camera2D, view_w: int, view_h: int) is
+    let mut i: int = 0
+    while i < world.entities.len() is
+        let e: Entity2D = world.entities[i]
+        if e.alive && h2d_texture::is_valid(e.texture) && h2d_camera2d::is_visible(cam, e.pos.x, e.pos.y, e.width, e.height, view_w + 0.0, view_h + 0.0) is
+            let sp: h2d_vec2::Vec2 = h2d_camera2d::to_screen(cam, e.pos)
+            let dw: f64 = e.width * cam.zoom
+            let dh: f64 = e.height * cam.zoom
+            h2d_texture::draw_texture_ex(e.texture, sp.x, sp.y, dw, dh, e.rotation, dw / 2.0, dh / 2.0, false, false, e.tint)
         end
         i += 1
     end
