@@ -44,3 +44,82 @@ end
 pub fn sleep_ms(ms: int) is
     time::sleep_ms(ms)
 end
+
+;; ── 0.3.0: frame-time based timers (graphics engine) ───────────────────
+;; Feed them `h2d_gfx::get_frame_time()` each frame.
+
+;; "Can fire again in N seconds": weapon reload, spawn delay, invincibility
+;; frames, coyote time.
+pub struct Cooldown is
+    pub duration:  f64
+    pub remaining: f64
+end
+
+pub fn new_cooldown(duration: f64) -> Cooldown is
+    return Cooldown { duration: duration, remaining: 0.0 }
+end
+
+pub fn cooldown_tick(mut c: Cooldown, dt: f64) -> Cooldown is
+    if c.remaining > 0.0 is
+        c.remaining -= dt
+        if c.remaining < 0.0 is c.remaining = 0.0 end
+    end
+    return c
+end
+
+pub fn cooldown_ready(c: Cooldown) -> bool is
+    return c.remaining <= 0.0
+end
+
+;; Starts the cooldown (full duration).
+pub fn cooldown_start(mut c: Cooldown) -> Cooldown is
+    c.remaining = c.duration
+    return c
+end
+
+;; 0.0 = just started .. 1.0 = ready; for cooldown bars.
+pub fn cooldown_progress(c: Cooldown) -> f64 is
+    if c.duration <= 0.0 is return 1.0 end
+    return 1.0 - c.remaining / c.duration
+end
+
+;; Counts up in seconds. `repeating` timers wrap and report each lap via
+;; `timer_fired`; one-shot timers stay finished.
+pub struct Timer is
+    pub interval: f64
+    pub elapsed:  f64
+    pub repeating: bool
+    pub fired:    bool
+    pub running:  bool
+end
+
+pub fn new_timer(interval: f64, repeating: bool) -> Timer is
+    return Timer { interval: interval, elapsed: 0.0, repeating: repeating, fired: false, running: true }
+end
+
+;; Call once per frame; afterwards `timer_fired(t)` is true for exactly this frame if it elapsed.
+pub fn timer_tick(mut t: Timer, dt: f64) -> Timer is
+    t.fired = false
+    if !t.running is return t end
+    t.elapsed += dt
+    if t.elapsed >= t.interval is
+        t.fired = true
+        if t.repeating is
+            t.elapsed -= t.interval
+        else is
+            t.running = false
+        end
+    end
+    return t
+end
+
+pub fn timer_fired(t: Timer) -> bool is
+    return t.fired
+end
+
+pub fn timer_reset(mut t: Timer) -> Timer is
+    t.elapsed = 0.0
+    t.fired = false
+    t.running = true
+    return t
+end
