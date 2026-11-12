@@ -1,4 +1,5 @@
 mod h2d_vec2
+use "std -> math" from "m"
 
 ;; Pixel-space scrolling/zooming camera for h2d_gfx's window — the
 ;; graphics-engine counterpart to h2d_camera.h#'s grid-cell camera for
@@ -17,10 +18,12 @@ pub struct Camera2D is
     pub target: h2d_vec2::Vec2   ;; world-space point the camera is centered on
     pub offset: h2d_vec2::Vec2   ;; screen-space point `target` maps to (usually screen center)
     pub zoom:   f64              ;; 1.0 = no zoom, 2.0 = 2x magnified, 0.5 = zoomed out
+    pub shake_power: f64         ;; current shake amplitude in pixels (decays to 0)
+    pub shake_time:  f64         ;; internal clock driving the shake pattern
 end
 
 pub fn new_camera2d(offset: h2d_vec2::Vec2) -> Camera2D is
-    return Camera2D { target: h2d_vec2::vec2_zero(), offset: offset, zoom: 1.0 }
+    return Camera2D { target: h2d_vec2::vec2_zero(), offset: offset, zoom: 1.0, shake_power: 0.0, shake_time: 0.0 }
 end
 
 ;; The common case: a camera whose offset is the window's center, so
@@ -45,15 +48,17 @@ end
 pub fn to_screen(cam: Camera2D, world: h2d_vec2::Vec2) -> h2d_vec2::Vec2 is
     let dx: f64 = (world.x - cam.target.x) * cam.zoom
     let dy: f64 = (world.y - cam.target.y) * cam.zoom
-    return h2d_vec2::vec2(cam.offset.x + dx, cam.offset.y + dy)
+    let sh: h2d_vec2::Vec2 = shake_offset(cam)
+    return h2d_vec2::vec2(cam.offset.x + dx + sh.x, cam.offset.y + dy + sh.y)
 end
 
 ;; Screen-space pixel position (e.g. from h2d_input2d::mouse_position())
 ;; -> world-space — the inverse of to_screen, for "what world tile did
 ;; the player click on".
 pub fn to_world(cam: Camera2D, screen: h2d_vec2::Vec2) -> h2d_vec2::Vec2 is
-    let dx: f64 = (screen.x - cam.offset.x) / cam.zoom
-    let dy: f64 = (screen.y - cam.offset.y) / cam.zoom
+    let sh: h2d_vec2::Vec2 = shake_offset(cam)
+    let dx: f64 = (screen.x - cam.offset.x - sh.x) / cam.zoom
+    let dy: f64 = (screen.y - cam.offset.y - sh.y) / cam.zoom
     return h2d_vec2::vec2(cam.target.x + dx, cam.target.y + dy)
 end
 
@@ -94,4 +99,50 @@ pub fn follow_clamped(mut cam: Camera2D, target: h2d_vec2::Vec2, world_w: f64, w
 
     cam.target = h2d_vec2::vec2(tx, ty)
     return cam
+end
+
+;; ── 0.3.0: screen shake, smooth follow, zoom helpers ─────────────────────
+
+;; Current shake displacement in screen pixels (0, 0 when not shaking).
+;; to_screen/to_world already include it.
+pub fn shake_offset(cam: Camera2D) -> h2d_vec2::Vec2 is
+    if cam.shake_power <= 0.01 is return h2d_vec2::vec2_zero() end
+    return h2d_vec2::vec2(m::sin(cam.shake_time * 57.0) * cam.shake_power, m::cos(cam.shake_time * 43.0) * cam.shake_power)
+end
+
+;; Kicks the camera: `power` pixels of shake that fades out by itself
+;; (explosions, hits, landing). Stronger kicks win over weaker ones.
+pub fn shake(mut cam: Camera2D, power: f64) -> Camera2D is
+    if power > cam.shake_power is cam.shake_power = power end
+    return cam
+end
+
+;; Call once per frame: advances and decays the shake (~0.5 s to calm down).
+pub fn update(mut cam: Camera2D, dt: f64) -> Camera2D is
+    cam.shake_time += dt
+    if cam.shake_power > 0.0 is
+        cam.shake_power -= cam.shake_power * 6.0 * dt + 2.0 * dt
+        if cam.shake_power < 0.0 is cam.shake_power = 0.0 end
+    end
+    return cam
+end
+
+;; Eases the camera toward `target` instead of snapping: `speed` ~ 4..10
+;; (higher = tighter). Frame-rate independent.
+pub fn follow_smooth(mut cam: Camera2D, target: h2d_vec2::Vec2, speed: f64, dt: f64) -> Camera2D is
+    let k: f64 = 1.0 - m::exp(0.0 - speed * dt)
+    cam.target = h2d_vec2::lerp(cam.target, target, k)
+    return cam
+end
+
+;; Zoom around the screen centre, clamped to a sane range.
+pub fn zoom_by(mut cam: Camera2D, factor: f64, min_zoom: f64, max_zoom: f64) -> Camera2D is
+    cam.zoom = h2d_vec2::clamp_f(cam.zoom * factor, min_zoom, max_zoom)
+    return cam
+end
+
+;; Is a world-space rectangle at least partly on screen? (culling your own sprites)
+pub fn is_visible(cam: Camera2D, x: f64, y: f64, w: f64, h: f64, view_w: f64, view_h: f64) -> bool is
+    let a: h2d_vec2::Vec2 = to_screen(cam, h2d_vec2::vec2(x, y))
+    return a.x + w * cam.zoom > 0.0 && a.y + h * cam.zoom > 0.0 && a.x < view_w && a.y < view_h
 end
