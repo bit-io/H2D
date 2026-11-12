@@ -1,6 +1,7 @@
+use "std -> io" from "io"
 pub fn read_action(prompt: string) -> string is
     io_print(prompt)
-    let raw: string = io_read_line()
+    let raw: string = io::read_line("")
     return normalize(raw)
 end
 
