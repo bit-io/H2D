@@ -1,4 +1,5 @@
 mod h2d_keys
+mod h2d_vec2
 
 ;; Real-time input for h2d_gfx's window — polled every frame, not
 ;; blocking like h2d_input's `read_action` (which reads a whole line
@@ -10,7 +11,7 @@ mod h2d_keys
 ;; once per frame before reading these — state here reflects "as of the
 ;; most recent next_frame()/init_window() call", not truly live.
 
-extern dynamic [c, "h2d_native"] is
+extern static [c, "h2d_native"] is
     fn h2d_is_key_down(key: int) -> int
     fn h2d_is_key_pressed(key: int) -> int
     fn h2d_is_key_released(key: int) -> int
@@ -75,4 +76,116 @@ pub fn wasd_axis() -> (f64, f64) is
     if is_key_down(h2d_keys::key_up()) || is_key_down(h2d_keys::key_w()) is dy -= 1.0 end
     if is_key_down(h2d_keys::key_down()) || is_key_down(h2d_keys::key_s()) is dy += 1.0 end
     return (dx, dy)
+end
+
+;; ── 0.3.0: released/delta, typed text, any-key, gamepad, actions ────────
+
+extern dynamic [c, "h2d_native"] is
+    fn h2d_mouse_dx() -> f64
+    fn h2d_mouse_dy() -> f64
+    fn h2d_is_mouse_button_released(button: int) -> int
+    fn h2d_get_key_pressed() -> int
+    fn h2d_start_text_input()
+    fn h2d_stop_text_input()
+    fn h2d_get_char_pressed() -> int
+    fn h2d_gamepad_count() -> int
+    fn h2d_gamepad_connected(pad: int) -> int
+    fn h2d_gamepad_button_down(pad: int, button: int) -> int
+    fn h2d_gamepad_button_pressed(pad: int, button: int) -> int
+    fn h2d_gamepad_axis(pad: int, axis: int) -> f64
+end
+
+pub fn is_mouse_button_released(button: int) -> bool is
+    return h2d_is_mouse_button_released(button) != 0
+end
+
+;; Mouse movement since the previous frame (use with set_relative_mouse).
+pub fn mouse_delta() -> (f64, f64) is
+    return (h2d_mouse_dx(), h2d_mouse_dy())
+end
+
+;; The h2d_keys code of the first key pressed this frame, or -1 when none —
+;; "press any key to start", key rebinding screens.
+pub fn key_pressed_code() -> int is
+    return h2d_get_key_pressed()
+end
+
+pub fn any_key_pressed() -> bool is
+    return h2d_get_key_pressed() >= 0
+end
+
+;; Typed text: call start_text_input() once, then each frame loop
+;; `get_char_pressed()` until it returns 0. Each value is a Unicode code
+;; point (so ą, ę, ż arrive correctly), not a key code. Name-entry boxes,
+;; chat, console.
+pub fn start_text_input() is h2d_start_text_input() end
+pub fn stop_text_input() is h2d_stop_text_input() end
+pub fn get_char_pressed() -> int is return h2d_get_char_pressed() end
+
+;; Gamepads (up to 4). Button numbers: see gp_* below.
+pub fn gamepad_count() -> int is return h2d_gamepad_count() end
+pub fn is_gamepad_connected(pad: int) -> bool is return h2d_gamepad_connected(pad) != 0 end
+pub fn is_gamepad_button_down(pad: int, button: int) -> bool is return h2d_gamepad_button_down(pad, button) != 0 end
+pub fn is_gamepad_button_pressed(pad: int, button: int) -> bool is return h2d_gamepad_button_pressed(pad, button) != 0 end
+
+;; axis: 0 = left X, 1 = left Y, 2 = right X, 3 = right Y, 4/5 = triggers.
+;; Returns -1.0 .. 1.0 with a dead zone of 0.15 already applied.
+pub fn gamepad_axis(pad: int, axis: int) -> f64 is
+    let v: f64 = h2d_gamepad_axis(pad, axis)
+    if v > -0.15 && v < 0.15 is return 0.0 end
+    return v
+end
+
+pub fn gp_a() -> int is return 0 end
+pub fn gp_b() -> int is return 1 end
+pub fn gp_x() -> int is return 2 end
+pub fn gp_y() -> int is return 3 end
+pub fn gp_back() -> int is return 4 end
+pub fn gp_start() -> int is return 6 end
+pub fn gp_lb() -> int is return 9 end
+pub fn gp_rb() -> int is return 10 end
+pub fn gp_up() -> int is return 11 end
+pub fn gp_down() -> int is return 12 end
+pub fn gp_left() -> int is return 13 end
+pub fn gp_right() -> int is return 14 end
+
+;; One movement axis in -1..1 from two keys (and pad 0's stick / d-pad):
+;; `axis_x = h2d_input2d::axis(key_left(), key_right())`.
+pub fn axis(neg_key: int, pos_key: int) -> f64 is
+    let mut v: f64 = 0.0
+    if is_key_down(neg_key) is v -= 1.0 end
+    if is_key_down(pos_key) is v += 1.0 end
+    return v
+end
+
+;; Like wasd_axis() but also reads gamepad 0 (left stick + d-pad) and is
+;; normalised, so diagonals are not faster. Returns (dx, dy) with length <= 1.
+pub fn move_axis() -> (f64, f64) is
+    let k = wasd_axis()
+    let mut dx: f64 = k.0
+    let mut dy: f64 = k.1
+    if h2d_gamepad_connected(0) != 0 is
+        dx += gamepad_axis(0, 0)
+        if is_gamepad_button_down(0, 13) is dx -= 1.0 end
+        if is_gamepad_button_down(0, 14) is dx += 1.0 end
+        dy += gamepad_axis(0, 1)
+        if is_gamepad_button_down(0, 11) is dy -= 1.0 end
+        if is_gamepad_button_down(0, 12) is dy += 1.0 end
+    end
+    let len2: f64 = dx * dx + dy * dy
+    if len2 > 1.0 is
+        let len: f64 = h2d_vec2::vec2(dx, dy).length()
+        dx = dx / len
+        dy = dy / len
+    end
+    return (dx, dy)
+end
+
+;; "Jump / confirm" from space, enter, up-less keys or the pad's A button.
+pub fn confirm_pressed() -> bool is
+    return is_key_pressed(h2d_keys::key_space()) || is_key_pressed(h2d_keys::key_enter()) || is_gamepad_button_pressed(0, 0)
+end
+
+pub fn cancel_pressed() -> bool is
+    return is_key_pressed(h2d_keys::key_escape()) || is_gamepad_button_pressed(0, 1)
 end
