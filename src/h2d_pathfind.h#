@@ -24,17 +24,22 @@ pub fn bfs_path(map: h2d_tilemap::Tilemap, start_x: int, start_y: int, goal_x: i
 
     let visited: any = col::hashmap_new()
     let parent: any = col::hashmap_new()
-    let mut frontier: any = queue_new()
+    ;; FIFO queue = two parallel arrays + a read cursor (true BFS, so the
+    ;; first path found is a shortest one).
+    let mut qx: [int] = []
+    let mut qy: [int] = []
+    let mut head: int = 0
 
     col::hashmap_insert(visited, key_of(start_x, start_y), "1")
-    frontier.push((start_x, start_y))
+    qx.push(start_x)
+    qy.push(start_y)
 
     let mut found: bool = false
 
-    while !frontier.is_empty() && !found is
-        let cur = frontier.pop()
-        let cx: int = cur.0
-        let cy: int = cur.1
+    while head < qx.len() && !found is
+        let cx: int = qx[head]
+        let cy: int = qy[head]
+        head += 1
 
         let nbr_xs: [int] = h2d_collision::neighbors_x(cx)
         let nbr_ys: [int] = h2d_collision::neighbors_y(cy)
@@ -46,7 +51,8 @@ pub fn bfs_path(map: h2d_tilemap::Tilemap, start_x: int, start_y: int, goal_x: i
             if !h2d_tilemap::is_solid(map, nx, ny, solid_chars) && !col::hashmap_contains(visited, k) is
                 col::hashmap_insert(visited, k, "1")
                 col::hashmap_insert(parent, k, key_of(cx, cy))
-                frontier.push((nx, ny))
+                qx.push(nx)
+                qy.push(ny)
                 if nx == goal_x && ny == goal_y is found = true end
             end
             i += 1
