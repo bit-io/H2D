@@ -1,4 +1,4 @@
-extern dynamic [c, "h2d_native"] is
+extern static [c, "h2d_native"] is
     fn h2d_audio_init() -> int
     fn h2d_load_sound(path: string) -> int
     fn h2d_play_sound(handle: int)
@@ -87,3 +87,47 @@ end
 pub fn set_music_volume(volume: f64) is
     h2d_set_music_volume(volume)
 end
+
+;; ── 0.3.0: unloading, panning, fades, master volume ──────────────────
+
+extern dynamic [c, "h2d_native"] is
+    fn h2d_unload_sound(handle: int)
+    fn h2d_unload_music(handle: int)
+    fn h2d_play_sound_ex(handle: int, volume: f64, pan: f64, do_loop: int) -> int
+    fn h2d_stop_channel(ch: int)
+    fn h2d_pause_music()
+    fn h2d_resume_music()
+    fn h2d_is_music_playing() -> int
+    fn h2d_fade_in_music(handle: int, do_loop: int, ms: int)
+    fn h2d_fade_out_music(ms: int)
+    fn h2d_set_master_volume(volume: f64)
+end
+
+pub fn unload_sound(s: Sound) is
+    if s.handle != 0 is h2d_unload_sound(s.handle) end
+end
+
+pub fn unload_music(m: Music) is
+    if m.handle != 0 is h2d_unload_music(m.handle) end
+end
+
+;; Plays with explicit volume (0..1) and stereo pan (-1 left .. 1 right).
+;; Returns the mixer channel (pass to stop_channel for a looping sound),
+;; or -1 if it could not play (no audio, invalid sound).
+pub fn play_sound_ex(s: Sound, volume: f64, pan: f64, looping: bool) -> int is
+    return h2d_play_sound_ex(s.handle, volume, pan, if looping then 1 else 0)
+end
+
+pub fn stop_channel(ch: int) is h2d_stop_channel(ch) end
+pub fn pause_music() is h2d_pause_music() end
+pub fn resume_music() is h2d_resume_music() end
+pub fn is_music_playing() -> bool is return h2d_is_music_playing() != 0 end
+
+pub fn fade_in_music(m: Music, looping: bool, ms: int) is
+    h2d_fade_in_music(m.handle, if looping then 1 else 0, ms)
+end
+
+pub fn fade_out_music(ms: int) is h2d_fade_out_music(ms) end
+
+;; Volume of ALL sound effects at once (a settings-screen slider), 0..1.
+pub fn set_master_volume(volume: f64) is h2d_set_master_volume(volume) end
