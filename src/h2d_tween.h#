@@ -1,0 +1,121 @@
+use "std -> math" from "m"
+
+;; Easing + tweening (pure maths, works with either engine).
+;;
+;;   let mut t: h2d_tween::Tween = h2d_tween::new_tween(0.0, 300.0, 0.8, h2d_tween::out_bounce())
+;;   ... each frame:  t = h2d_tween::update(t, dt)
+;;                    x = h2d_tween::value(t)
+
+pub fn linear()       -> int is return 0 end
+pub fn in_quad()      -> int is return 1 end
+pub fn out_quad()     -> int is return 2 end
+pub fn in_out_quad()  -> int is return 3 end
+pub fn in_cubic()     -> int is return 4 end
+pub fn out_cubic()    -> int is return 5 end
+pub fn in_out_cubic() -> int is return 6 end
+pub fn in_sine()      -> int is return 7 end
+pub fn out_sine()     -> int is return 8 end
+pub fn in_out_sine()  -> int is return 9 end
+pub fn out_back()     -> int is return 10 end
+pub fn out_bounce()   -> int is return 11 end
+pub fn out_elastic()  -> int is return 12 end
+
+fn bounce_out(t: f64) -> f64 is
+    let n1: f64 = 7.5625
+    let d1: f64 = 2.75
+    if t < 1.0 / d1 is
+        return n1 * t * t
+    end
+    if t < 2.0 / d1 is
+        let u: f64 = t - 1.5 / d1
+        return n1 * u * u + 0.75
+    end
+    if t < 2.5 / d1 is
+        let u: f64 = t - 2.25 / d1
+        return n1 * u * u + 0.9375
+    end
+    let u: f64 = t - 2.625 / d1
+    return n1 * u * u + 0.984375
+end
+
+;; Maps progress t (0..1, clamped) through the easing curve `kind` -> 0..1
+;; (some curves overshoot slightly: back, elastic).
+pub fn ease(kind: int, t0: f64) -> f64 is
+    let t: f64 = if t0 < 0.0 then 0.0 else if t0 > 1.0 then 1.0 else t0
+    let pi: f64 = 3.14159265358979
+    if kind == 1 is return t * t end
+    if kind == 2 is return 1.0 - (1.0 - t) * (1.0 - t) end
+    if kind == 3 is
+        if t < 0.5 is return 2.0 * t * t end
+        return 1.0 - 2.0 * (1.0 - t) * (1.0 - t)
+    end
+    if kind == 4 is return t * t * t end
+    if kind == 5 is
+        let u: f64 = 1.0 - t
+        return 1.0 - u * u * u
+    end
+    if kind == 6 is
+        if t < 0.5 is return 4.0 * t * t * t end
+        let u: f64 = 1.0 - t
+        return 1.0 - 4.0 * u * u * u
+    end
+    if kind == 7 is return 1.0 - m::cos(t * pi / 2.0) end
+    if kind == 8 is return m::sin(t * pi / 2.0) end
+    if kind == 9 is return 0.0 - (m::cos(pi * t) - 1.0) / 2.0 end
+    if kind == 10 is
+        let c1: f64 = 1.70158
+        let c3: f64 = c1 + 1.0
+        let u: f64 = t - 1.0
+        return 1.0 + c3 * u * u * u + c1 * u * u
+    end
+    if kind == 11 is return bounce_out(t) end
+    if kind == 12 is
+        if t == 0.0 is return 0.0 end
+        if t == 1.0 is return 1.0 end
+        return m::pow(2.0, 0.0 - 10.0 * t) * m::sin((t * 10.0 - 0.75) * (2.0 * pi / 3.0)) + 1.0
+    end
+    return t
+end
+
+pub struct Tween is
+    pub start_v:  f64
+    pub end_v:    f64
+    pub duration: f64
+    pub elapsed:  f64
+    pub kind:     int
+    pub finished: bool
+end
+
+pub fn new_tween(start_v: f64, end_v: f64, duration: f64, kind: int) -> Tween is
+    return Tween { start_v: start_v, end_v: end_v, duration: duration, elapsed: 0.0, kind: kind, finished: false }
+end
+
+pub fn update(mut t: Tween, dt: f64) -> Tween is
+    if t.finished is return t end
+    t.elapsed += dt
+    if t.elapsed >= t.duration is
+        t.elapsed = t.duration
+        t.finished = true
+    end
+    return t
+end
+
+pub fn value(t: Tween) -> f64 is
+    if t.duration <= 0.0 is return t.end_v end
+    return t.start_v + (t.end_v - t.start_v) * ease(t.kind, t.elapsed / t.duration)
+end
+
+pub fn is_finished(t: Tween) -> bool is
+    return t.finished
+end
+
+pub fn restart(mut t: Tween) -> Tween is
+    t.elapsed = 0.0
+    t.finished = false
+    return t
+end
+
+;; Runs the other way (back to the start) beginning at the current value.
+pub fn reverse(t: Tween) -> Tween is
+    return Tween { start_v: value(t), end_v: t.start_v, duration: t.duration, elapsed: 0.0, kind: t.kind, finished: false }
+end
