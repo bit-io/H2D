@@ -1,19 +1,24 @@
 [package]
 -> name        => h2d
--> version     => 0.1.0
--> description => 2D game engine for H#. Primary engine: real windowed/GPU graphics via SDL2 (h2d_gfx/h2d_texture/h2d_input2d/h2d_audio2/...). Also includes the original character-grid ANSI truecolor text engine (h2d_canvas/h2d_entity/...), kept for turn-based games.
+-> version     => 0.3.0
+-> description => 2D game engine for H#: windowed GPU graphics (SDL2), tile maps + physics, particles, UI, scenes, audio, gamepad, TrueType text. Also the older character-grid ANSI text engine for turn-based games.
 -> authors     => ["Bit Developers"]
 -> license     => MIT
 -> lang        => h#
 
 [edition]
--> edition => 2026
+-> edition   => 2026
+-> toolchain => 0.9
 
 [layout]
--> src => src
+-> src      => src
+-> tests    => tests
+-> examples => examples
 
 [build]
--> link => static
+-> link             => static
+-> native           => ./native/build.sh
+-> native-lib-path  => build
 
 [lib]
 -> output => hlib
@@ -24,9 +29,22 @@
 
 [dependencies]
 
-[native-sources]
--> c      => [native/h2d_native.c]
--> flags  => -O2 -Wall
+[commands]
+-> native
+--> run => ./native/build.sh
+--> description => Build libh2d_native.a (needs the SDL2 dev packages, see [system-dependencies])
+-> test
+--> run => ./tests/run.sh
+--> description => Run the window-less logic tests (tests/logic_test.h#)
+-> platformer
+--> run => ./scripts/run-example.sh platformer
+--> description => Build and run the platformer demo (tiles, physics, particles, UI, scenes)
+-> pong
+--> run => ./scripts/run-example.sh pong
+--> description => Build and run the two-player Pong demo
+-> sokoban
+--> run => ./scripts/run-example.sh sokoban
+--> description => Build and run the text-engine Sokoban demo (terminal)
 
 [system-dependencies]
 -> sdl2
@@ -69,3 +87,13 @@
 --> apk => sdl2_gfx-dev
 --> zypper => libSDL2_gfx-devel
 --> brew => sdl2_gfx
+-> SDL2_ttf
+--> pkg-config => SDL2_ttf
+--> header => SDL2/SDL_ttf.h
+--> lib => SDL2_ttf
+--> apt => libsdl2-ttf-dev
+--> dnf => SDL2_ttf-devel
+--> pacman => sdl2_ttf
+--> apk => sdl2_ttf-dev
+--> zypper => libSDL2_ttf-devel
+--> brew => sdl2_ttf
