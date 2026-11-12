@@ -16,6 +16,14 @@ mod h2d_entity2d
 mod h2d_anim2d
 mod h2d_collision2d
 mod h2d_app2d
+;; 0.3.0 — everything for finished games
+mod h2d_tween
+mod h2d_tiles2d
+mod h2d_physics2d
+mod h2d_particles
+mod h2d_ui
+mod h2d_scene
+mod h2d_save
 
 ;; ── text engine: character-grid ANSI-truecolor terminal renderer,
 ;;    turn-based input. Fully working, unrelated coordinate space and
@@ -38,5 +46,5 @@ mod h2d_pathfind
 mod h2d_menu
 
 pub fn version() -> string is
-    return "0.2.0"
+    return "0.3.0"
 end
