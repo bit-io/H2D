@@ -50,6 +50,49 @@ pub fn key_lctrl()     -> int is return 46 end
 pub fn key_rctrl()     -> int is return 47 end
 pub fn key_backspace() -> int is return 48 end
 
+;; ── 0.3.0: function keys, modifiers, navigation, punctuation, numpad ──
+pub fn key_f1() -> int is return 49 end
+pub fn key_f2() -> int is return 50 end
+pub fn key_f3() -> int is return 51 end
+pub fn key_f4() -> int is return 52 end
+pub fn key_f5() -> int is return 53 end
+pub fn key_f6() -> int is return 54 end
+pub fn key_f7() -> int is return 55 end
+pub fn key_f8() -> int is return 56 end
+pub fn key_f9() -> int is return 57 end
+pub fn key_f10() -> int is return 58 end
+pub fn key_f11() -> int is return 59 end
+pub fn key_f12() -> int is return 60 end
+pub fn key_lalt() -> int is return 61 end
+pub fn key_ralt() -> int is return 62 end
+pub fn key_delete() -> int is return 63 end
+pub fn key_insert() -> int is return 64 end
+pub fn key_home() -> int is return 65 end
+pub fn key_end() -> int is return 66 end
+pub fn key_pageup() -> int is return 67 end
+pub fn key_pagedown() -> int is return 68 end
+pub fn key_minus() -> int is return 69 end
+pub fn key_equals() -> int is return 70 end
+pub fn key_comma() -> int is return 71 end
+pub fn key_period() -> int is return 72 end
+pub fn key_slash() -> int is return 73 end
+pub fn key_semicolon() -> int is return 74 end
+pub fn key_apostrophe() -> int is return 75 end
+pub fn key_lbracket() -> int is return 76 end
+pub fn key_rbracket() -> int is return 77 end
+pub fn key_backslash() -> int is return 78 end
+pub fn key_grave() -> int is return 79 end
+pub fn key_kp0() -> int is return 80 end
+pub fn key_kp1() -> int is return 81 end
+pub fn key_kp2() -> int is return 82 end
+pub fn key_kp3() -> int is return 83 end
+pub fn key_kp4() -> int is return 84 end
+pub fn key_kp5() -> int is return 85 end
+pub fn key_kp6() -> int is return 86 end
+pub fn key_kp7() -> int is return 87 end
+pub fn key_kp8() -> int is return 88 end
+pub fn key_kp9() -> int is return 89 end
+
 ;; Mouse buttons for h2d_input2d::is_mouse_button_down/pressed.
 pub fn mouse_left()   -> int is return 0 end
 pub fn mouse_middle() -> int is return 1 end
