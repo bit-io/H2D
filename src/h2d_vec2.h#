@@ -41,6 +41,34 @@ impl Vec2 is
         return Vec2 { x: self.x / len, y: self.y / len }
     end
 
+    fn length_sq(self) -> f64 is
+        return self.x * self.x + self.y * self.y
+    end
+    fn distance_to(self, other: Vec2) -> f64 is
+        let dx: f64 = self.x - other.x
+        let dy: f64 = self.y - other.y
+        return m::sqrt(dx * dx + dy * dy)
+    end
+    ;; Angle in DEGREES, 0 = +x (right), 90 = +y (down on screen).
+    fn angle_deg(self) -> f64 is
+        return m::atan2(self.y, self.x) * 180.0 / 3.14159265358979
+    end
+    ;; Rotated by `deg` degrees (clockwise on screen, since +y is down).
+    fn rotated(self, deg: f64) -> Vec2 is
+        let r: f64 = deg * 3.14159265358979 / 180.0
+        let c: f64 = m::cos(r)
+        let s: f64 = m::sin(r)
+        return Vec2 { x: self.x * c - self.y * s, y: self.x * s + self.y * c }
+    end
+    fn perp(self) -> Vec2 is
+        return Vec2 { x: 0.0 - self.y, y: self.x }
+    end
+    ;; Same direction, length limited to `max_len`.
+    fn clamped_length(self, max_len: f64) -> Vec2 is
+        let len: f64 = self.length()
+        if len <= max_len || len == 0.0 is return self end
+        return Vec2 { x: self.x / len * max_len, y: self.y / len * max_len }
+    end
     fn to_int_x(self) -> int is return __builtin_conv_float_to_int(self.x) end
     fn to_int_y(self) -> int is return __builtin_conv_float_to_int(self.y) end
 end
@@ -56,4 +84,41 @@ end
 
 pub fn vec2_zero() -> Vec2 is
     return Vec2 { x: 0.0, y: 0.0 }
+end
+
+;; Unit vector pointing `deg` degrees from +x (see Vec2.angle_deg).
+pub fn from_angle_deg(deg: f64) -> Vec2 is
+    let r: f64 = deg * 3.14159265358979 / 180.0
+    return Vec2 { x: m::cos(r), y: m::sin(r) }
+end
+
+pub fn lerp(a: Vec2, b: Vec2, t: f64) -> Vec2 is
+    return Vec2 { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
+end
+
+pub fn lerp_f(a: f64, b: f64, t: f64) -> f64 is
+    return a + (b - a) * t
+end
+
+pub fn clamp_f(v: f64, lo: f64, hi: f64) -> f64 is
+    if v < lo is return lo end
+    if v > hi is return hi end
+    return v
+end
+
+pub fn sign_f(v: f64) -> f64 is
+    if v > 0.0 is return 1.0 end
+    if v < 0.0 is return 0.0 - 1.0 end
+    return 0.0
+end
+
+pub fn abs_f(v: f64) -> f64 is
+    return f64_abs(v)
+end
+
+;; Largest integer <= v, as int (works for negatives, unlike plain truncation).
+pub fn floor_int(v: f64) -> int is
+    let t: int = __builtin_conv_float_to_int(v)
+    if (t + 0.0) > v is return t - 1 end
+    return t
 end
