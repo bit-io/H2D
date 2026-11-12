@@ -1,0 +1,141 @@
+mod h2d_vec2
+mod h2d_tiles2d
+
+;; Axis-aligned bodies that move through a TileMap2D and stop against solid
+;; tiles. Covers platformers (gravity + jump) and top-down games (zero
+;; gravity) with the same call: move_body().
+;;
+;; A Body is the rectangle (pos.x, pos.y, w, h) with pos = TOP-LEFT corner.
+
+pub struct Body is
+    pub pos:    h2d_vec2::Vec2
+    pub vel:    h2d_vec2::Vec2     ;; pixels / second
+    pub w:      f64
+    pub h:      f64
+    pub on_ground:    bool         ;; blocked while moving down this frame
+    pub hit_ceiling:  bool
+    pub hit_left:     bool
+    pub hit_right:    bool
+    pub air_time:     f64          ;; seconds since last on the ground (coyote time)
+end
+
+pub fn new_body(x: f64, y: f64, w: f64, h: f64) -> Body is
+    return Body {
+        pos: h2d_vec2::vec2(x, y), vel: h2d_vec2::vec2_zero(), w: w, h: h,
+        on_ground: false, hit_ceiling: false, hit_left: false, hit_right: false, air_time: 0.0,
+    }
+end
+
+pub fn center(b: Body) -> h2d_vec2::Vec2 is
+    return h2d_vec2::vec2(b.pos.x + b.w / 2.0, b.pos.y + b.h / 2.0)
+end
+
+;; vel.y += gravity * dt, capped at max_fall (both pixels/second units).
+pub fn apply_gravity(mut b: Body, gravity: f64, max_fall: f64, dt: f64) -> Body is
+    b.vel.y += gravity * dt
+    if b.vel.y > max_fall is b.vel.y = max_fall end
+    return b
+end
+
+;; Jump: only when standing on the ground or within `coyote` seconds of
+;; leaving it (0.08-0.12 feels fair). `speed` is the upward launch speed.
+pub fn jump(mut b: Body, speed: f64, coyote: f64) -> Body is
+    if b.on_ground || b.air_time <= coyote is
+        b.vel.y = 0.0 - speed
+        b.on_ground = false
+        b.air_time = coyote + 1.0
+    end
+    return b
+end
+
+;; Releasing the jump key early cuts the jump short (variable jump height).
+pub fn cut_jump(mut b: Body, factor: f64) -> Body is
+    if b.vel.y < 0.0 is b.vel.y = b.vel.y * factor end
+    return b
+end
+
+fn step_count(d: f64, limit: f64) -> int is
+    let a: f64 = if d < 0.0 then 0.0 - d else d
+    let n: int = __builtin_conv_float_to_int(a / limit) + 1
+    return n
+end
+
+;; Moves the body by vel * dt, one axis at a time, in sub-steps small enough
+;; that fast bodies cannot tunnel through a thin wall. On contact the body
+;; is snapped flush to the tile and that velocity component is zeroed; the
+;; hit_* / on_ground flags describe THIS frame.
+pub fn move_body(mut b: Body, map: h2d_tiles2d::TileMap2D, dt: f64) -> Body is
+    b.on_ground = false
+    b.hit_ceiling = false
+    b.hit_left = false
+    b.hit_right = false
+    let limit: f64 = ((if map.tile_w < map.tile_h then map.tile_w else map.tile_h) + 0.0) / 2.0
+
+    ;; ---- X axis
+    let dx: f64 = b.vel.x * dt
+    if dx != 0.0 is
+        let n: int = step_count(dx, limit)
+        let sx: f64 = dx / (n + 0.0)
+        let mut i: int = 0
+        while i < n is
+            b.pos.x += sx
+            if h2d_tiles2d::rect_hits_solid(map, b.pos.x, b.pos.y, b.w, b.h) is
+                if sx > 0.0 is
+                    let tx: int = h2d_tiles2d::tile_x_at(map, b.pos.x + b.w - 0.0001)
+                    b.pos.x = ((tx * map.tile_w) + 0.0) - b.w - 0.001
+                    b.hit_right = true
+                else is
+                    let tx: int = h2d_tiles2d::tile_x_at(map, b.pos.x)
+                    b.pos.x = (((tx + 1) * map.tile_w) + 0.0) + 0.001
+                    b.hit_left = true
+                end
+                b.vel.x = 0.0
+                i = n
+            end
+            i += 1
+        end
+    end
+
+    ;; ---- Y axis
+    let dy: f64 = b.vel.y * dt
+    if dy != 0.0 is
+        let n: int = step_count(dy, limit)
+        let sy: f64 = dy / (n + 0.0)
+        let mut i: int = 0
+        while i < n is
+            b.pos.y += sy
+            if h2d_tiles2d::rect_hits_solid(map, b.pos.x, b.pos.y, b.w, b.h) is
+                if sy > 0.0 is
+                    let ty: int = h2d_tiles2d::tile_y_at(map, b.pos.y + b.h - 0.0001)
+                    b.pos.y = ((ty * map.tile_h) + 0.0) - b.h - 0.001
+                    b.on_ground = true
+                else is
+                    let ty: int = h2d_tiles2d::tile_y_at(map, b.pos.y)
+                    b.pos.y = (((ty + 1) * map.tile_h) + 0.0) + 0.001
+                    b.hit_ceiling = true
+                end
+                b.vel.y = 0.0
+                i = n
+            end
+            i += 1
+        end
+    end
+
+    if b.on_ground is
+        b.air_time = 0.0
+    else is
+        b.air_time += dt
+    end
+    return b
+end
+
+;; Do two bodies overlap?
+pub fn bodies_overlap(a: Body, b: Body) -> bool is
+    return a.pos.x < b.pos.x + b.w && a.pos.x + a.w > b.pos.x && a.pos.y < b.pos.y + b.h && a.pos.y + a.h > b.pos.y
+end
+
+;; Is there solid ground right under the body's feet (1px probe)? Works
+;; even when the body was not moved this frame.
+pub fn is_grounded(b: Body, map: h2d_tiles2d::TileMap2D) -> bool is
+    return h2d_tiles2d::rect_hits_solid(map, b.pos.x, b.pos.y + 1.0, b.w, b.h)
+end
