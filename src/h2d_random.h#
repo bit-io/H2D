@@ -65,3 +65,49 @@ pub fn shuffle_strings(arr: [string]) -> [string] is
     end
     return out
 end
+
+;; ── 0.3.0: seedable, reproducible generator ─────────────────────────────
+;; The functions above use the OS CSPRNG (unseedable, slow-ish). Games want
+;; a deterministic generator: same seed = same dungeon / same replay.
+;; Park-Miller "minimal standard" (state in 1..2147483646), pure H#.
+
+pub struct Rng is
+    pub state: int
+end
+
+pub fn new_rng(seed: int) -> Rng is
+    let mut s: int = seed % 2147483646
+    if s < 0 is s = 0 - s end
+    if s == 0 is s = 1 end
+    return Rng { state: s }
+end
+
+;; Advances the generator; returns (rng, value in 0 .. 2147483645).
+pub fn rng_next(mut r: Rng) -> (Rng, int) is
+    r.state = (r.state * 48271) % 2147483647
+    return (r, r.state - 1)
+end
+
+;; Inclusive on both ends.
+pub fn rng_range(mut r: Rng, lo: int, hi: int) -> (Rng, int) is
+    let n = rng_next(r)
+    let span: int = hi - lo + 1
+    if span <= 0 is return (n.0, lo) end
+    return (n.0, lo + n.1 % span)
+end
+
+;; Uniform float in [0.0, 1.0).
+pub fn rng_f64(mut r: Rng) -> (Rng, f64) is
+    let n = rng_next(r)
+    return (n.0, (n.1 + 0.0) / 2147483646.0)
+end
+
+pub fn rng_range_f(mut r: Rng, lo: f64, hi: f64) -> (Rng, f64) is
+    let n = rng_f64(r)
+    return (n.0, lo + (hi - lo) * n.1)
+end
+
+pub fn rng_chance(mut r: Rng, percent: int) -> (Rng, bool) is
+    let n = rng_range(r, 1, 100)
+    return (n.0, n.1 <= percent)
+end
