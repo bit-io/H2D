@@ -18,7 +18,10 @@ mod h2d_color
 ;; a well-worn, easy-to-teach shape for an immediate-mode 2D engine —
 ;; not a source dependency, just a familiar naming convention.
 
-extern dynamic [c, "h2d_native"] is
+;; System libraries the native backend needs. `extern static [c, "<pkg>"]`
+;; makes h# resolve them through pkg-config (bit never allows `extern dynamic`).
+;; Declared before the h2d_native block so the linker sees the archive first.
+extern static [c, "h2d_native"] is
     fn h2d_init_window(width: int, height: int, title: string) -> int
     fn h2d_window_should_close() -> int
     fn h2d_close_window()
@@ -155,4 +158,178 @@ end
 ;; center or right-align (`draw_text(s, (screen_width() - measure_text(s, 16)) / 2, y, 16, c)`).
 pub fn measure_text(text: string, size: int) -> int is
     return h2d_measure_text(text, size)
+end
+
+extern dynamic [c, "h2d_native"] is
+    fn h2d_set_window_size(w: int, h: int)
+    fn h2d_set_window_min_size(w: int, h: int)
+    fn h2d_set_fullscreen(on: int)
+    fn h2d_is_fullscreen() -> int
+    fn h2d_set_logical_size(w: int, h: int)
+    fn h2d_set_integer_scale(on: int)
+    fn h2d_show_cursor(on: int)
+    fn h2d_set_relative_mouse(on: int)
+    fn h2d_set_window_icon(path: string)
+    fn h2d_request_close()
+    fn h2d_get_fps() -> f64
+    fn h2d_get_frame_count() -> int
+    fn h2d_get_ticks_ms() -> int
+    fn h2d_set_blend_mode(mode: int)
+    fn h2d_set_clip(x: f64, y: f64, w: f64, h: f64)
+    fn h2d_clear_clip()
+    fn h2d_draw_pixel(x: f64, y: f64, r: int, g: int, b: int, a: int)
+    fn h2d_draw_ellipse(cx: f64, cy: f64, rx: f64, ry: f64, r: int, g: int, b: int, a: int)
+    fn h2d_draw_ellipse_lines(cx: f64, cy: f64, rx: f64, ry: f64, r: int, g: int, b: int, a: int)
+    fn h2d_draw_rounded_rect(x: f64, y: f64, w: f64, h: f64, radius: f64, r: int, g: int, b: int, a: int)
+    fn h2d_draw_rounded_rect_lines(x: f64, y: f64, w: f64, h: f64, radius: f64, r: int, g: int, b: int, a: int)
+    fn h2d_draw_triangle_lines(x1: f64, y1: f64, x2: f64, y2: f64, x3: f64, y3: f64, r: int, g: int, b: int, a: int)
+    fn h2d_load_font(path: string, pt_size: int) -> int
+    fn h2d_unload_font(handle: int)
+    fn h2d_draw_text_font(font: int, text: string, x: f64, y: f64, r: int, g: int, b: int, a: int)
+    fn h2d_measure_text_font(font: int, text: string) -> int
+    fn h2d_font_height(font: int) -> int
+    fn h2d_save_screenshot(path: string) -> int
+end
+
+;; ── window control ───────────────────────────────────────────────────
+
+pub fn set_window_size(w: int, h: int) is h2d_set_window_size(w, h) end
+pub fn set_window_min_size(w: int, h: int) is h2d_set_window_min_size(w, h) end
+
+;; Borderless "desktop" fullscreen on/off. Toggle with e.g. F11.
+pub fn set_fullscreen(on: bool) is
+    h2d_set_fullscreen(if on then 1 else 0)
+end
+
+pub fn is_fullscreen() -> bool is
+    return h2d_is_fullscreen() != 0
+end
+
+pub fn toggle_fullscreen() is
+    set_fullscreen(!is_fullscreen())
+end
+
+;; Virtual resolution. After `set_logical_size(320, 180)` you draw in a
+;; 320x180 world and H2D scales + letterboxes it to whatever the window
+;; is — the standard way to make pixel-art games resolution independent.
+;; screen_width()/screen_height() then return 320/180 and mouse
+;; coordinates are reported in the same virtual space. (0, 0) turns it off.
+pub fn set_logical_size(w: int, h: int) is h2d_set_logical_size(w, h) end
+
+;; With a logical size set: only scale by whole numbers (no shimmering pixels).
+pub fn set_integer_scale(on: bool) is
+    h2d_set_integer_scale(if on then 1 else 0)
+end
+
+pub fn show_cursor(on: bool) is
+    h2d_show_cursor(if on then 1 else 0)
+end
+
+;; Captures the mouse (for mouse-look / drag scrolling); mouse_dx/dy then report motion.
+pub fn set_relative_mouse(on: bool) is
+    h2d_set_relative_mouse(if on then 1 else 0)
+end
+
+pub fn set_window_icon(path: string) is h2d_set_window_icon(path) end
+
+;; Makes window_should_close() true (e.g. from a "Quit" menu button).
+pub fn request_close() is h2d_request_close() end
+
+;; Smoothed frames-per-second, for a debug overlay.
+pub fn get_fps() -> f64 is return h2d_get_fps() end
+pub fn get_frame_count() -> int is return h2d_get_frame_count() end
+pub fn get_ticks_ms() -> int is return h2d_get_ticks_ms() end
+
+;; Saves the frame drawn so far as PNG (call before next_frame()). True on success.
+pub fn save_screenshot(path: string) -> bool is
+    return h2d_save_screenshot(path) != 0
+end
+
+;; ── blend / clipping ─────────────────────────────────────────────────
+
+pub fn blend_none() -> int is return 0 end
+pub fn blend_alpha() -> int is return 1 end
+pub fn blend_add() -> int is return 2 end
+pub fn blend_multiply() -> int is return 3 end
+
+;; Blend mode for rectangles and textures drawn afterwards (default: alpha).
+;; Additive is what glows, fire and magic particles want.
+pub fn set_blend_mode(mode: int) is h2d_set_blend_mode(mode) end
+
+;; Only pixels inside the rectangle are drawn until clear_clip() — scroll
+;; panels, minimaps, split-screen.
+pub fn set_clip(x: f64, y: f64, w: f64, h: f64) is h2d_set_clip(x, y, w, h) end
+pub fn clear_clip() is h2d_clear_clip() end
+
+;; ── more primitives ──────────────────────────────────────────────────
+
+pub fn draw_pixel(x: f64, y: f64, c: h2d_color::Color) is
+    h2d_draw_pixel(x, y, c.r, c.g, c.b, c.a)
+end
+
+pub fn draw_ellipse(cx: f64, cy: f64, rx: f64, ry: f64, c: h2d_color::Color) is
+    h2d_draw_ellipse(cx, cy, rx, ry, c.r, c.g, c.b, c.a)
+end
+
+pub fn draw_ellipse_lines(cx: f64, cy: f64, rx: f64, ry: f64, c: h2d_color::Color) is
+    h2d_draw_ellipse_lines(cx, cy, rx, ry, c.r, c.g, c.b, c.a)
+end
+
+pub fn draw_rounded_rect(x: f64, y: f64, w: f64, h: f64, radius: f64, c: h2d_color::Color) is
+    h2d_draw_rounded_rect(x, y, w, h, radius, c.r, c.g, c.b, c.a)
+end
+
+pub fn draw_rounded_rect_lines(x: f64, y: f64, w: f64, h: f64, radius: f64, c: h2d_color::Color) is
+    h2d_draw_rounded_rect_lines(x, y, w, h, radius, c.r, c.g, c.b, c.a)
+end
+
+pub fn draw_triangle_lines(x1: f64, y1: f64, x2: f64, y2: f64, x3: f64, y3: f64, c: h2d_color::Color) is
+    h2d_draw_triangle_lines(x1, y1, x2, y2, x3, y3, c.r, c.g, c.b, c.a)
+end
+
+;; ── TrueType fonts (UTF-8: "zażółć gęślą jaźń" works) ────────────────
+
+;; A loaded TTF/OTF font at a fixed point size. handle == 0 means loading
+;; failed (bad path); drawing with it is then a silent no-op, so check
+;; `font.handle != 0` or fall back to draw_text().
+pub struct Font is
+    pub handle: int
+    pub size:   int
+end
+
+pub fn load_font(path: string, pt_size: int) -> Font is
+    return Font { handle: h2d_load_font(path, pt_size), size: pt_size }
+end
+
+pub fn is_font_valid(f: Font) -> bool is
+    return f.handle != 0
+end
+
+pub fn unload_font(f: Font) is
+    if f.handle != 0 is h2d_unload_font(f.handle) end
+end
+
+;; Rendered strings are cached, so calling this every frame is cheap.
+pub fn draw_text_font(f: Font, text: string, x: f64, y: f64, c: h2d_color::Color) is
+    h2d_draw_text_font(f.handle, text, x, y, c.r, c.g, c.b, c.a)
+end
+
+pub fn measure_text_font(f: Font, text: string) -> int is
+    return h2d_measure_text_font(f.handle, text)
+end
+
+pub fn font_height(f: Font) -> int is
+    return h2d_font_height(f.handle)
+end
+
+;; pkg-config packages pulled in transitively by libh2d_native.a
+extern dynamic [c, "sdl2"] is
+end
+extern dynamic [c, "SDL2_image"] is
+end
+extern dynamic [c, "SDL2_mixer"] is
+end
+extern dynamic [c, "SDL2_gfx"] is
+end
+extern dynamic [c, "SDL2_ttf"] is
 end
