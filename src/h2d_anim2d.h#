@@ -79,3 +79,107 @@ pub fn draw(anim: SpriteSheetAnim, x: f64, y: f64, dst_w: f64, dst_h: f64, tint:
     let sy: f64 = src_y_for(anim, anim.current)
     h2d_texture::draw_texture_rec(anim.texture, sx, sy, anim.frame_w, anim.frame_h, x, y, dst_w, dst_h, tint)
 end
+
+;; ── 0.3.0: Animator — several named clips on ONE sheet ──────────────────
+;;
+;;   let mut hero: h2d_anim2d::Animator = h2d_anim2d::new_animator(sheet, 32, 32)
+;;   hero = h2d_anim2d::add_clip(hero, "idle", 0, 4, 200, true)    ;; frames 0..3
+;;   hero = h2d_anim2d::add_clip(hero, "run",  4, 6, 90,  true)    ;; frames 4..9
+;;   hero = h2d_anim2d::add_clip(hero, "jump", 10, 2, 120, false)
+;;   ... per frame:  hero = h2d_anim2d::play(hero, if moving then "run" else "idle")
+;;                   hero = h2d_anim2d::animator_update(hero, dt_ms)
+;;                   h2d_anim2d::animator_draw(hero, x, y, 64.0, 64.0, facing_left, h2d_color::white())
+
+pub struct Clip is
+    pub name:    string
+    pub first:   int        ;; first frame index on the sheet (row-major)
+    pub count:   int
+    pub frame_ms: int
+    pub looping: bool
+end
+
+pub struct Animator is
+    pub texture:   h2d_texture::Texture2D
+    pub frame_w:   int
+    pub frame_h:   int
+    pub columns:   int
+    pub clips:     [Clip]
+    pub clip:      int      ;; index into clips (-1 = none)
+    pub frame:     int      ;; frame within the current clip
+    pub elapsed_ms: int
+    pub finished:  bool
+end
+
+pub fn new_animator(texture: h2d_texture::Texture2D, frame_w: int, frame_h: int) -> Animator is
+    let mut cols: int = 1
+    if frame_w > 0 is cols = texture.width / frame_w end
+    if cols < 1 is cols = 1 end
+    return Animator { texture: texture, frame_w: frame_w, frame_h: frame_h, columns: cols, clips: [], clip: 0 - 1, frame: 0, elapsed_ms: 0, finished: false }
+end
+
+pub fn add_clip(mut a: Animator, name: string, first: int, count: int, frame_ms: int, looping: bool) -> Animator is
+    a.clips.push(Clip { name: name, first: first, count: count, frame_ms: frame_ms, looping: looping })
+    if a.clip < 0 is a.clip = 0 end
+    return a
+end
+
+fn clip_index(a: Animator, name: string) -> int is
+    let mut i: int = 0
+    while i < a.clips.len() is
+        if a.clips[i].name == name is return i end
+        i += 1
+    end
+    return 0 - 1
+end
+
+;; Switches to a clip by name. Calling it every frame with the SAME clip
+;; does not restart it; an unknown name is ignored.
+pub fn play(mut a: Animator, name: string) -> Animator is
+    let idx: int = clip_index(a, name)
+    if idx < 0 || idx == a.clip is return a end
+    a.clip = idx
+    a.frame = 0
+    a.elapsed_ms = 0
+    a.finished = false
+    return a
+end
+
+pub fn current_clip_name(a: Animator) -> string is
+    if a.clip < 0 is return "" end
+    return a.clips[a.clip].name
+end
+
+pub fn is_clip_finished(a: Animator) -> bool is
+    return a.finished
+end
+
+pub fn animator_update(mut a: Animator, dt_ms: int) -> Animator is
+    if a.clip < 0 || a.finished is return a end
+    let c: Clip = a.clips[a.clip]
+    if c.frame_ms <= 0 || c.count <= 1 is return a end
+    a.elapsed_ms += dt_ms
+    while a.elapsed_ms >= c.frame_ms is
+        a.elapsed_ms -= c.frame_ms
+        a.frame += 1
+        if a.frame >= c.count is
+            if c.looping is
+                a.frame = 0
+            else is
+                a.frame = c.count - 1
+                a.finished = true
+                return a
+            end
+        end
+    end
+    return a
+end
+
+;; Draws the current frame at (x, y) stretched to (dst_w, dst_h); `flip_h`
+;; mirrors it (character facing left).
+pub fn animator_draw(a: Animator, x: f64, y: f64, dst_w: f64, dst_h: f64, flip_h: bool, tint: h2d_color::Color) is
+    if a.clip < 0 is return end
+    let idx: int = a.clips[a.clip].first + a.frame
+    let col: int = idx % a.columns
+    let row: int = idx / a.columns
+    h2d_texture::draw_texture_full(a.texture, (col * a.frame_w) + 0.0, (row * a.frame_h) + 0.0, a.frame_w + 0.0, a.frame_h + 0.0, x, y, dst_w, dst_h, 0.0, 0.0, 0.0, flip_h, false, tint)
+end
