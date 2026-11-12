@@ -1,1 +1,297 @@
+mod h2d_gfx
+mod h2d_color
+mod h2d_keys
+mod h2d_input2d
+mod h2d_texture
+mod h2d_vec2
+mod h2d_tiles2d
+mod h2d_physics2d
+mod h2d_camera2d
+mod h2d_anim2d
+mod h2d_particles
+mod h2d_ui
+mod h2d_scene
+mod h2d_save
+mod h2d_tween
+mod h2d_timer
+mod h2d_audio2
 
+;; Platformer — a complete small game written only with H2D's public API:
+;; virtual 320x180 resolution, tile map + tile physics, coyote-time jump,
+;; animated sprite generated in code (no asset files), smooth camera with
+;; shake, particles, immediate-mode UI, scene fades, persistent high score.
+;;
+;; Controls: A/D or arrows (or gamepad stick) move, Space/W/Up/pad-A jump,
+;; F11 fullscreen, Esc back/quit.
+;;
+;; Headless smoke test:  H2D_MAX_FRAMES=240 H2D_SCREENSHOT=shot.png ./platformer
+
+const VW: int = 320
+const VH: int = 180
+const SCENE_MENU: int = 0
+const SCENE_PLAY: int = 1
+const SCENE_WIN: int = 2
+
+const T_GROUND: int = 1
+const T_COIN: int = 2
+const T_SPIKE: int = 3
+const T_SPAWN: int = 4
+const T_EXIT: int = 5
+
+fn level_rows() -> [string] is
+    return [
+        "........................................",
+        "........................................",
+        "........................................",
+        "..................o.o.o.................",
+        "...........o.....#####.........o........",
+        "..........###..................###......",
+        "...o...............................o....",
+        "..###.......o.o...........####.......E..",
+        ".S.........#####.....o..........o...###.",
+        "#########.......#########....#########.#",
+        "#########..^^^..#########.^^.#########.#",
+        "########################################",
+    ]
+end
+
+fn make_level() -> h2d_tiles2d::TileMap2D is
+    let mut m: h2d_tiles2d::TileMap2D = h2d_tiles2d::from_rows(level_rows(), "#o^SE", 16, 16)
+    m = h2d_tiles2d::set_solid(m, [T_GROUND])
+    return m
+end
+
+fn palette() -> [h2d_color::Color] is
+    return [
+        h2d_color::color_rgb(96, 70, 52),    ;; ground
+        h2d_color::color_rgb(255, 214, 64),  ;; coin
+        h2d_color::color_rgb(220, 60, 60),   ;; spike
+        h2d_color::color(0, 0, 0, 0),   ;; spawn marker (invisible)
+        h2d_color::color_rgb(80, 220, 140),  ;; exit
+    ]
+end
+
+;; 4 frames of 12x14: two idle (eyes open/blink), two run
+fn make_hero_sheet() -> h2d_texture::Texture2D is
+    let rows: [string] = [
+        "..bbbbbbbb....  ..bbbbbbbb....  ..bbbbbbbb....  ..bbbbbbbb....",
+        ".bbbbbbbbbb...  .bbbbbbbbbb...  .bbbbbbbbbb...  .bbbbbbbbbb...",
+        ".bbwwbbwwbb...  .bbbbbbbbbb...  .bbwwbbwwbb...  .bbwwbbwwbb...",
+        ".bbwkbbwkbb...  .bbkkbbkkbb...  .bbwkbbwkbb...  .bbwkbbwkbb...",
+        ".bbbbbbbbbb...  .bbbbbbbbbb...  .bbbbbbbbbb...  .bbbbbbbbbb...",
+        "..bbbbbbbb....  ..bbbbbbbb....  ..bbbbbbbb....  ..bbbbbbbb....",
+        "..rrrrrrrr....  ..rrrrrrrr....  ..rrrrrrrr....  ..rrrrrrrr....",
+        ".rrrrrrrrrr...  .rrrrrrrrrr...  .rrrrrrrrrr...  .rrrrrrrrrr...",
+        ".rrrrrrrrrr...  .rrrrrrrrrr...  .rrrrrrrrrr...  .rrrrrrrrrr...",
+        ".rrrrrrrrrr...  .rrrrrrrrrr...  .rrrrrrrrrr...  .rrrrrrrrrr...",
+        "..rrrrrrrr....  ..rrrrrrrr....  ..rrrrrrrr....  ..rrrrrrrr....",
+        "..dd....dd....  ..dd....dd....  .dd......dd...  ...dd..dd.....",
+        "..dd....dd....  ..dd....dd....  .dd......dd...  ...dd..dd.....",
+        ".ddd....ddd...  .ddd....ddd...  .ddd....ddd...  ..ddd..ddd....",
+    ]
+    ;; strip the 2-space separators between frames
+    let mut clean: [string] = []
+    let mut i: int = 0
+    while i < rows.len() is
+        let mut line: string = ""
+        let mut f: int = 0
+        while f < 4 is
+            line = line + rows[i][f * 16..f * 16 + 14]
+            f += 1
+        end
+        clean.push(line)
+        i += 1
+    end
+    let pal: [h2d_color::Color] = [
+        h2d_color::color_rgb(240, 200, 150), h2d_color::color_rgb(220, 60, 60), h2d_color::color_rgb(50, 50, 120),
+        h2d_color::white(), h2d_color::black(),
+    ]
+    return h2d_texture::load_texture_from_art(clean, "brdwk", pal)
+end
+
+struct Game is
+    pub map:       h2d_tiles2d::TileMap2D
+    pub hero:      h2d_physics2d::Body
+    pub anim:      h2d_anim2d::Animator
+    pub facing_left: bool
+    pub cam:       h2d_camera2d::Camera2D
+    pub fx:        h2d_particles::ParticleSystem
+    pub score:     int
+    pub coins_total: int
+    pub spawn:     h2d_vec2::Vec2
+    pub time:      f64
+    pub jump_buffer: h2d_timer::Cooldown
+end
+
+fn new_game(sheet: h2d_texture::Texture2D) -> Game is
+    let mut map: h2d_tiles2d::TileMap2D = make_level()
+    let sp: h2d_vec2::Vec2 = h2d_tiles2d::find_tile(map, T_SPAWN)
+    map = h2d_tiles2d::set_tile(map, h2d_tiles2d::tile_x_at(map, sp.x), h2d_tiles2d::tile_y_at(map, sp.y), 0)
+    let mut anim: h2d_anim2d::Animator = h2d_anim2d::new_animator(sheet, 14, 14)
+    anim = h2d_anim2d::add_clip(anim, "idle", 0, 2, 450, true)
+    anim = h2d_anim2d::add_clip(anim, "run", 2, 2, 110, true)
+    let mut cam: h2d_camera2d::Camera2D = h2d_camera2d::new_camera2d_centered(VW, VH)
+    cam = h2d_camera2d::set_target(cam, sp)
+    let mut fx: h2d_particles::ParticleSystem = h2d_particles::new_system(2026)
+    fx = h2d_particles::set_gravity(fx, 0.0, 260.0)
+    return Game {
+        coins_total: h2d_tiles2d::count_tiles(map, T_COIN),
+        map: map, hero: h2d_physics2d::new_body(sp.x + 2.0, sp.y, 10.0, 14.0), anim: anim, facing_left: false,
+        cam: cam, fx: fx, score: 0, spawn: sp, time: 0.0, jump_buffer: h2d_timer::new_cooldown(0.1),
+    }
+end
+
+fn respawn(mut g: Game) -> Game is
+    g.hero = h2d_physics2d::new_body(g.spawn.x + 2.0, g.spawn.y, 10.0, 14.0)
+    g.cam = h2d_camera2d::shake(g.cam, 6.0)
+    return g
+end
+
+;; returns (game, won)
+fn update_game(mut g: Game, dt: f64) -> (Game, bool) is
+    g.time += dt
+    let mv = h2d_input2d::move_axis()
+    let want_jump: bool = h2d_input2d::is_key_pressed(h2d_keys::key_space()) || h2d_input2d::is_key_pressed(h2d_keys::key_w()) || h2d_input2d::is_key_pressed(h2d_keys::key_up()) || h2d_input2d::is_gamepad_button_pressed(0, 0)
+    let jump_held: bool = h2d_input2d::is_key_down(h2d_keys::key_space()) || h2d_input2d::is_key_down(h2d_keys::key_w()) || h2d_input2d::is_key_down(h2d_keys::key_up()) || h2d_input2d::is_gamepad_button_down(0, 0)
+
+    ;; horizontal control with a little acceleration
+    let target: f64 = mv.0 * 95.0
+    g.hero.vel.x = g.hero.vel.x + (target - g.hero.vel.x) * h2d_vec2::clamp_f(dt * 14.0, 0.0, 1.0)
+    if mv.0 < 0.0 is g.facing_left = true end
+    if mv.0 > 0.0 is g.facing_left = false end
+
+    ;; jump buffering (press slightly before landing) + coyote time
+    g.jump_buffer = h2d_timer::cooldown_tick(g.jump_buffer, dt)
+    if want_jump is g.jump_buffer = h2d_timer::cooldown_start(g.jump_buffer) end
+    if !h2d_timer::cooldown_ready(g.jump_buffer) && (g.hero.on_ground || g.hero.air_time < 0.1) is
+        g.hero = h2d_physics2d::jump(g.hero, 250.0, 0.1)
+        g.jump_buffer = h2d_timer::new_cooldown(0.1)
+        g.fx = h2d_particles::cone(g.fx, h2d_vec2::vec2(g.hero.pos.x + 5.0, g.hero.pos.y + 14.0), 6, 90.0, 80.0, 20.0, 60.0, 0.3, 2.0, h2d_color::color_rgb(220, 210, 190), h2d_color::color(220, 210, 190, 0))
+    end
+    if !jump_held is g.hero = h2d_physics2d::cut_jump(g.hero, 0.5) end
+
+    let was_air: bool = !g.hero.on_ground
+    let fall_speed: f64 = g.hero.vel.y
+    g.hero = h2d_physics2d::apply_gravity(g.hero, 700.0, 380.0, dt)
+    g.hero = h2d_physics2d::move_body(g.hero, g.map, dt)
+    if was_air && g.hero.on_ground && fall_speed > 200.0 is
+        g.cam = h2d_camera2d::shake(g.cam, 2.0)
+    end
+
+    ;; tile interaction: coins, spikes, exit
+    let c: h2d_vec2::Vec2 = h2d_physics2d::center(g.hero)
+    let tx: int = h2d_tiles2d::tile_x_at(g.map, c.x)
+    let ty: int = h2d_tiles2d::tile_y_at(g.map, c.y)
+    let here: int = h2d_tiles2d::get_tile(g.map, tx, ty)
+    if here == T_COIN is
+        g.map = h2d_tiles2d::set_tile(g.map, tx, ty, 0)
+        g.score += 10
+        g.fx = h2d_particles::burst(g.fx, h2d_vec2::vec2((tx * 16) + 8.0, (ty * 16) + 8.0), 14, 30.0, 110.0, 0.5, 2.5, h2d_color::yellow(), h2d_color::color(255, 120, 0, 0))
+    end
+    if here == T_SPIKE || g.hero.pos.y > 400.0 is
+        g.fx = h2d_particles::burst(g.fx, c, 30, 40.0, 160.0, 0.6, 3.0, h2d_color::red(), h2d_color::color(80, 0, 0, 0))
+        g = respawn(g)
+    end
+    let won: bool = (here == T_EXIT)
+
+    ;; animation
+    if g.hero.on_ground && (g.hero.vel.x > 8.0 || g.hero.vel.x < 0.0 - 8.0) is
+        g.anim = h2d_anim2d::play(g.anim, "run")
+    else is
+        g.anim = h2d_anim2d::play(g.anim, "idle")
+    end
+    g.anim = h2d_anim2d::animator_update(g.anim, __builtin_conv_float_to_int(dt * 1000.0))
+
+    ;; camera: look slightly ahead, glide, stay inside the level
+    g.cam = h2d_camera2d::update(g.cam, dt)
+    let look: f64 = if g.facing_left then 0.0 - 18.0 else 18.0
+    let mut want: h2d_vec2::Vec2 = h2d_vec2::vec2(c.x + look, c.y - 10.0)
+    want.x = h2d_vec2::clamp_f(want.x, (VW / 2) + 0.0, h2d_tiles2d::pixel_width(g.map) - (VW / 2))
+    want.y = h2d_vec2::clamp_f(want.y, (VH / 2) + 0.0, h2d_tiles2d::pixel_height(g.map) - (VH / 2))
+    g.cam = h2d_camera2d::follow_smooth(g.cam, want, 5.0, dt)
+    g.fx = h2d_particles::update(g.fx, dt)
+    return (g, won)
+end
+
+fn draw_game(g: Game, th: h2d_ui::Theme, best: int) is
+    ;; sky gradient from two flat bands
+    h2d_gfx::clear_background(h2d_color::color_rgb(110, 170, 230))
+    h2d_gfx::draw_rectangle(0.0, (VH / 2) + 0.0, VW + 0.0, (VH / 2) + 0.0, h2d_color::color_rgb(150, 200, 240))
+
+    h2d_tiles2d::draw_flat(g.map, palette(), g.cam, VW, VH)
+
+    let sp: h2d_vec2::Vec2 = h2d_camera2d::to_screen(g.cam, g.hero.pos)
+    h2d_anim2d::animator_draw(g.anim, sp.x - 2.0, sp.y, 14.0 * g.cam.zoom, 14.0 * g.cam.zoom, g.facing_left, h2d_color::white())
+    let off: h2d_vec2::Vec2 = h2d_camera2d::to_screen(g.cam, h2d_vec2::vec2(0.0, 0.0))
+    h2d_particles::draw(g.fx, off.x, off.y)
+
+    ;; HUD
+    h2d_gfx::draw_rectangle(0.0, 0.0, VW + 0.0, 16.0, h2d_color::color(0, 0, 0, 120))
+    h2d_ui::text(th, "Monety: " + to_string(g.score / 10) + "/" + to_string(g.coins_total), 6.0, 3.0)
+    h2d_ui::text(th, "Rekord: " + to_string(best), 200.0, 3.0)
+end
+
+fn main() is
+    h2d_gfx::init_window(960, 540, "H2D — Platformer")
+    h2d_gfx::set_target_fps(60)
+    h2d_gfx::set_logical_size(VW, VH)
+    h2d_gfx::set_integer_scale(true)
+    let _audio: bool = h2d_audio2::audio_init()
+
+    ;; Optional TrueType font (Polish diacritics). Falls back to the 8x8 bitmap font.
+    let mut th: h2d_ui::Theme = h2d_ui::default_theme()
+    let font: h2d_gfx::Font = h2d_gfx::load_font("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 11)
+    if h2d_gfx::is_font_valid(font) is th = h2d_ui::with_font(th, font) else is th.text_size = 8 end
+
+    let sheet: h2d_texture::Texture2D = make_hero_sheet()
+    let mut save: h2d_save::Save = h2d_save::load("platformer.sav")
+    let mut best: int = h2d_save::get_int(save, "best", 0)
+
+    let mut sc: h2d_scene::Scenes = h2d_scene::new_scenes(SCENE_MENU)
+    let mut g: Game = new_game(sheet)
+    let mut menu_t: h2d_tween::Tween = h2d_tween::new_tween(0.0 - 40.0, 40.0, 0.7, h2d_tween::out_bounce())
+
+    while !h2d_gfx::window_should_close() is
+        let dt: f64 = h2d_gfx::get_frame_time()
+        sc = h2d_scene::update(sc, dt)
+        if h2d_input2d::is_key_pressed(h2d_keys::key_f11()) is h2d_gfx::toggle_fullscreen() end
+
+        if sc.current == SCENE_MENU is
+            if h2d_scene::just_entered(sc) is menu_t = h2d_tween::new_tween(0.0 - 40.0, 40.0, 0.7, h2d_tween::out_bounce()) end
+            menu_t = h2d_tween::update(menu_t, dt)
+            h2d_gfx::clear_background(h2d_color::color_rgb(24, 28, 48))
+            h2d_ui::text_centered(th, "H2D PLATFORMER", 0.0, h2d_tween::value(menu_t), VW + 0.0, 20.0)
+            let pick: int = h2d_ui::menu(th, 110.0, 80.0, 100.0, 22.0, 8.0, ["Graj", "Wyjście"])
+            if pick == 0 is sc = h2d_scene::change(sc, SCENE_PLAY) end
+            if pick == 1 is h2d_gfx::request_close() end
+            h2d_ui::text_centered(th, "Najlepszy wynik: " + to_string(best), 0.0, 150.0, VW + 0.0, 12.0)
+        elsif sc.current == SCENE_PLAY is
+            if h2d_scene::just_entered(sc) is g = new_game(sheet) end
+            if !h2d_scene::is_transitioning(sc) is
+                let r = update_game(g, dt)
+                g = r.0
+                if r.1 is
+                    if g.score > best is
+                        best = g.score
+                        save = h2d_save::set_int(save, "best", best)
+                        let _ok: bool = h2d_save::commit(save)
+                    end
+                    sc = h2d_scene::change(sc, SCENE_WIN)
+                end
+                if h2d_input2d::cancel_pressed() is sc = h2d_scene::change(sc, SCENE_MENU) end
+            end
+            draw_game(g, th, best)
+        else is
+            h2d_gfx::clear_background(h2d_color::color_rgb(20, 60, 40))
+            h2d_ui::text_centered(th, "Poziom ukończony!", 0.0, 50.0, VW + 0.0, 20.0)
+            h2d_ui::text_centered(th, "Wynik: " + to_string(g.score), 0.0, 80.0, VW + 0.0, 16.0)
+            if h2d_ui::button(th, 110.0, 110.0, 100.0, 22.0, "Menu") is sc = h2d_scene::change(sc, SCENE_MENU) end
+        end
+
+        h2d_scene::draw_fade(sc)
+        h2d_gfx::next_frame()
+    end
+
+    h2d_gfx::unload_font(font)
+    h2d_gfx::close_window()
+end
