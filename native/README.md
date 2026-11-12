@@ -1,7 +1,7 @@
 # native/ — H2D's native graphics/audio/input backend
 
 `h2d_native.c` is a small C shim around SDL2 + SDL2_image + SDL2_mixer +
-SDL2_gfx. It gives H#'s `extern dynamic [c]` FFI (which can only cross the
+SDL2_gfx. It gives H#'s `extern [c]` FFI (which can only cross the
 language boundary with plain scalars — see the ABI note at the top of
 `h2d_native.c`) a flat, handle-based API to link against, instead of trying
 to expose SDL2's real struct-heavy API directly.
@@ -112,3 +112,19 @@ real, compiled, working C).
    directly, exactly as every existing function in these files does.
 4. Rebuild (`./native/build.sh`) and re-run (or extend) the smoke test
    described above before assuming it works.
+
+
+## 0.3.0 notes
+
+- **Dependencies:** SDL2, SDL2_image, SDL2_mixer, SDL2_gfx and **SDL2_ttf**
+  (`bit system check` verifies them). `build.sh` produces the *static archive*
+  `build/libh2d_native.a`; the game links it with `LIBRARY_PATH=build h# compile … --dynamic`.
+  `h# compile` has no `-L`/`-l` flags (the old instructions were wrong).
+- **ABI rule:** H# `int` = `int64_t`, `f64` = `double`, `string` = `const char*`. **`bytes` is
+  not a raw buffer**: at runtime it is an `HshArray*` (`len, cap, int64_t *data, own`, one `int64`
+  per byte). `h2d_load_texture_from_rgba` flattens it; copy that pattern for any new `bytes` param.
+- **Environment variables:** `H2D_MAX_FRAMES=N` quits after N frames; `H2D_SCREENSHOT=file.png`
+  saves the last frame as PNG. Combined with `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy` this is
+  the headless test mode used by `tests/smoke.sh`.
+- Input edges (pressed/released) are latched from the event queue, so a click that lasts less
+  than one frame is still seen.
