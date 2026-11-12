@@ -1,0 +1,28 @@
+pub fn point_in_rect(px: int, py: int, rx: int, ry: int, rw: int, rh: int) -> bool is
+    return px >= rx && py >= ry && px < rx + rw && py < ry + rh
+end
+
+pub fn rects_intersect(ax: int, ay: int, aw: int, ah: int, bx: int, by: int, bw: int, bh: int) -> bool is
+    return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by
+end
+
+fn iabs(v: int) -> int is
+    if v < 0 is return 0 - v end
+    return v
+end
+
+;; Manhattan distance between two grid cells.
+pub fn manhattan(ax: int, ay: int, bx: int, by: int) -> int is
+    return iabs(ax - bx) + iabs(ay - by)
+end
+
+;; The four orthogonal neighbours of a cell, split into two parallel
+;; arrays (x of neighbour i = neighbors_x(cx)[i], y = neighbors_y(cy)[i])
+;; because H# tuples-in-arrays are awkward. Order: up, down, left, right.
+pub fn neighbors_x(cx: int) -> [int] is
+    return [cx, cx, cx - 1, cx + 1]
+end
+
+pub fn neighbors_y(cy: int) -> [int] is
+    return [cy - 1, cy + 1, cy, cy]
+end
