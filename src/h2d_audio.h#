@@ -1,0 +1,14 @@
+use "std -> io" from "io"
+
+pub fn bell() is
+    io::print("\x07")
+end
+
+;; Does nothing, returns false: there is no audio device behind this module.
+pub fn audio_init() -> bool is
+    return false
+end
+
+pub fn play_sound(name: string) is
+    return
+end
