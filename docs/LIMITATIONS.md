@@ -1,92 +1,73 @@
-# Ograniczenia i status weryfikacji
+# Ograniczenia i status weryfikacji (0.3.0)
 
-Ten plik jest celowo szczery o tym, co w H2D zostało realnie uruchomione i
-sprawdzone, a co jest napisane poprawnie *wedle wiedzy o H#*, ale nie
-przepuszczone przez prawdziwy kompilator `h#`. Przeczytaj to przed
-budowaniem na tym czegoś większego.
+Ten plik mówi, co zostało naprawdę uruchomione, a co jest ograniczeniem
+na stałe lub do zrobienia. Wszystko poniżej sprawdzono prawdziwymi
+narzędziami: `h#` 0.9.0, `bit` 0.3.0, gcc, SDL2 2.30 / SDL2_image 2.8 /
+SDL2_mixer 2.8 / SDL2_gfx 1.0 / SDL2_ttf 2.22, Xvfb (prawdziwy serwer X11).
 
-## Silnik graficzny (`h2d_gfx`, `h2d_texture`, `h2d_input2d`, `h2d_audio2`, ...)
+## Co zweryfikowano
 
-**Co jest prawdziwe:** to nie atrapa. `native/h2d_native.c` to realny plik
-C, skompilowany w tym środowisku przeciwko prawdziwym nagłówkom SDL2 2.30 /
-SDL2_image 2.8 / SDL2_mixer 2.8 / SDL2_gfx 1.0, i **uruchomiony** (nie
-tylko skompilowany) przez `dlopen`/`dlsym` z headless backendem SDL
-(`SDL_VIDEODRIVER=dummy`, `SDL_AUDIODRIVER=dummy`):
+| Element | Jak |
+|---|---|
+| Wszystkie moduły `src/*.h#` | `h# check` bez błędów |
+| Logika bez okna (wektory, kolory, tween, RNG, timery, mapy, fizyka, kolizje, sceny, zapis, cząsteczki, kamera, silnik tekstowy) | `bit test` → 15 testów, 0 błędów (`tests/logic_test.h#`) |
+| Natywny backend `native/h2d_native.c` | `gcc -Wall -Wextra` bez ostrzeżeń |
+| Pong, platformówka | kompilacja `h# compile --dynamic`, uruchomienie pod Xvfb (X11) z prawdziwym oknem, kliknięcie myszą, sterowanie klawiaturą, zrzut ekranu obejrzany |
+| Tryb headless | `SDL_VIDEODRIVER=dummy` — `tests/smoke.sh` |
+| Sokoban (silnik tekstowy) | kompilacja i uruchomienie w terminalu |
+| `Bit.hk` | `bit publish`, `bit system check`, komendy `[commands]` |
 
-- otwarcie okna, pętla `begin_frame`/`end_frame`, limiter FPS — działa
-- wczytanie prawdziwego PNG i narysowanie go obróconego
-  (`SDL_RenderCopyEx`) — działa
-- prymitywy (prostokąt, koło, linia, trójkąt, tekst z wbudowanej
-  bitmapowej czcionki SDL2_gfx) — działa
-- `h2d_audio_init` na prawdziwym (choć niemym) urządzeniu audio — działa
-- błędne ścieżki/uchwyty (zły plik, uchwyt 0) — czysty no-op, nie crash
+## Czego NIE sprawdzono
 
-Dokładne polecenia weryfikacji są w `native/README.md`.
+- **Dźwięku na prawdziwym urządzeniu** — tylko sterownik `dummy` (ścieżki
+  wywołań działają, brak nasłuchu). Test: `bit pong`, podłożyć `assets/bounce.wav`.
+- **Pada** — kod obsługi zdarzeń napisany według dokumentacji SDL, bez fizycznego
+  urządzenia nie testowany.
+- **Windows / macOS / Wayland** — tylko Linux/X11. SDL2 jest wieloplatformowy, ale
+  `native/build.sh` i `scripts/run-example.sh` są skryptami bash.
+- **Akcelerowanego GPU** — Xvfb używa renderera programowego.
 
-**Czego NIE zweryfikowano:** strona H# (`src/h2d_gfx.h#`,
-`h2d_texture.h#`, `h2d_input2d.h#`, `h2d_audio2.h#`, `h2d_camera2d.h#`,
-`h2d_entity2d.h#`, `h2d_anim2d.h#`, `h2d_collision2d.h#`, `h2d_app2d.h#`,
-`h2d_color.h#`, `h2d_keys.h#`, `pong_main.h#`) — bo to środowisko nie ma
-toolchaina LLVM 21 potrzebnego do zbudowania samego kompilatora `h#`
-(`source-code/`), więc nie da się tu uruchomić `h# check`/`h# compile`.
-Każda deklaracja `extern` została ręcznie zweryfikowana względem
-udokumentowanego mapowania typów w `compiler::ffi::named_to_c`
-(`source-code/compiler/src/ffi.rs`) — H# `int` → C `int64_t`, `f64` →
-`double`, `bool` → C `int`, `string` → `const char*`, `bytes` →
-`uint8_t*` — a cała reszta składni względem działających przykładów już
-obecnych w repo H# (`examples/showcase.h#`, `tests/compiler/*.h#`,
-`std/money.h#`, `std/color.h#`, `h2d_menu.h#`). Zanim zbudujesz na tym coś
-większego: uruchom `h# check` na każdym nowym pliku, potem `h# compile
-src/pong_main.h#` i realnie zagraj w Ponga. Jeśli coś nie zadziała tak, jak
-opisano — to niemal na pewno literówka/nieporozumienie po stronie tego
-nowego kodu H#, nie po stronie `h2d_native.c` (który jest realny i
-przetestowany).
+## Ograniczenia na stałe i znane braki
 
-**Realne ograniczenia projektowe** (nie "jeszcze nie sprawdzone", tylko
-"tak to działa"):
-- FFI H# nie przenosi structów przez wartość (`StructByValueFfi`), więc
-  cała komunikacja z SDL2 idzie przez płaskie skalary — stąd uchwyty
-  (int) zamiast wskaźników, i stąd `draw_rectangle` bierze cztery
-  osobne inty r/g/b/a zamiast jednego `SDL_Color`. `h2d_gfx.h#` i
-  reszta chowają to za wygodniejszym `pub fn` API (przyjmującym
-  `h2d_color::Color`), ale bezpośrednio pod spodem to wciąż płaskie
-  wywołania C.
-- Wbudowany tekst to bitmapowa czcionka 8×8 z SDL2_gfx — bez kerningu,
-  bez Unicode poza ASCII, bez TrueType. Do prawdziwej typografii:
-  wczytaj własną czcionkę jako spritesheet i rysuj przez
-  `h2d_texture::draw_texture_rec` (to właśnie robi `h2d_anim2d`).
-- `std -> image` (wbudowany loader H#) dekoduje tylko nieskompresowany
-  24-bit BMP (patrz `std/image.h#`) — ale silnik graficzny go nie
-  potrzebuje: `h2d_texture::load_texture` idzie przez SDL_image (PNG,
-  JPG, BMP, GIF, ...) bezpośrednio z dysku, z realną dekompresją.
-- Dźwięk przez `h2d_audio2` wymaga realnego (lub `dummy`) urządzenia
-  audio dostępnego dla SDL — w pełni bezgłowym środowisku bez ŻADNEGO
-  audio backendu `audio_init()` zwróci `false`, a każda kolejna
-  funkcja w module jest wtedy bezpiecznym no-opem (gra działa dalej,
-  po prostu bez dźwięku).
-- Brak własnego systemu cząsteczek/shaderów/warstw post-processingu —
-  to prosty immediate-mode renderer 2D (rect/circle/line/texture),
-  celowo blisko API macroquad, nie silnik z shaderami czy sceną 3D.
+1. **`bit build` nie zbuduje gry z H2D.** `bit` linkuje wszystko statycznie i
+   odrzuca `extern dynamic` (`bit publish`: „uses `extern dynamic`”). SDL2 nie da
+   się zlinkować statycznie: próba `gcc -static` kończy się brakiem `libasound.a`,
+   a statyczny glibc nie ma `dlopen`, którego SDL potrzebuje do sterowników okna.
+   Obejście: `scripts/run-example.sh` (`h# compile --dynamic`, archiwum natywne
+   statycznie, SDL przez pkg-config). **Poprawka po stronie `bit`** (nie w tym
+   repo): zezwolić na `[build] link => dynamic` albo na `extern dynamic` dla
+   bibliotek z `[system-dependencies]`. Do tego czasu `bit publish` dla h2d
+   zgłasza ten jeden błąd, a poza nim Bit.hk jest poprawny.
+2. **`h#` linkuje bibliotekę natywną tylko po nazwie z `LIBRARY_PATH`.** Stare
+   instrukcje `-L build -lh2d_native` nie działają (`h# compile` nie ma takich
+   flag). Używaj `LIBRARY_PATH=build`, jak robią skrypty.
+3. **`mod x` szuka modułu obok kompilowanego pliku.** Dlatego skrypty kopiują
+   `src/*.h#` razem z przykładem/testem do katalogu tymczasowego. W grze własnej:
+   skopiuj `src/` do jej katalogu albo zrób to samo skryptem.
+4. **Bez cieniowania/shaderów, bez cienkich linii z antyaliasingiem o grubości > 1,
+   bez rysowania wielokątów wklęsłych** — tylko prymitywy SDL2_gfx i tekstury.
+5. **Tekst bitmapowy 8×8 nie ma polskich liter.** Do polskiego tekstu użyj
+   `h2d_gfx::load_font("…ttf", rozmiar)`. H2D nie dołącza żadnej czcionki;
+   wskaż własny plik `.ttf` (np. DejaVu: `/usr/share/fonts/truetype/dejavu/`).
+6. **Kolizje to AABB po siatce kafelków.** Brak ukośnych stoków, platform
+   jednostronnych, kolizji obracanych prostokątów i symulacji bryły sztywnej.
+7. **Brak sieci, brak ładowania map Tiled w formacie TMX/JSON** (jest CSV warstwy:
+   `h2d_tiles2d::from_csv`), brak emulacji dotyku, brak shaderów, brak wielu okien.
+8. **FFI H# nie przenosi struktur** — natywne API jest płaskie (liczby, napisy).
+   `bytes` to w H# `HshArray*` z jednym `int64` na bajt, nie surowy bufor; shim
+   spłaszcza go sam (w 0.2.0 był to błąd: tekstury z `load_texture_from_rgba`
+   były śmieciami).
+9. **Uchwyty zasobów są małymi liczbami w stałych tablicach** (tekstury, dźwięki,
+   fonty: limity w `native/h2d_native.c`). Przy ładowaniu „w pętli” zwalniaj
+   (`unload_*`), inaczej tablica się zapełni (wtedy `load_*` zwraca uchwyt 0).
+10. **`delta time` jest obcięty do 0,25 s**, żeby przeciągnięcie okna nie wystrzeliło
+    fizyki.
 
-## Silnik tekstowy (`h2d_canvas`, `h2d_entity`, `h2d_tilemap`, ...)
+## Naprawione względem 0.2.0 (znalezione przy uruchomieniu)
 
-Bez zmian względem wcześniejszej wersji tego pliku (a właściwie: bez
-zmian względem README's poprzedniej sekcji "Znane ograniczenia" — ten
-plik po prostu teraz istnieje naprawdę zamiast być tylko odnośnikiem bez
-celu):
-
-- Brak grafiki pikselowej/okna w tym silniku z założenia — to
-  ANSI truecolor w terminalu, i to jest cały jego sens (gry turowe:
-  roguelike, sokobany, strategie, karcianki).
-- Brak wejścia w czasie rzeczywistym w tym silniku — `h2d_input` czyta
-  całą linię (Enter kończy ruch), bo to silnik turowy z założenia. Do
-  czasu rzeczywistego służy teraz drugi silnik (`h2d_input2d`, wyżej).
-- `h2d_audio` w tym silniku zostaje uczciwą atrapą (loguje, nic nie
-  gra) — bo nie ma czego tu owijać: terminal nie odtwarza dźwięku, a
-  prawdziwy dźwięk (`h2d_audio2`) należy do silnika graficznego z jego
-  własnym oknem/urządzeniem audio, nie do tego modułu.
-- Kod tego silnika był już wcześniej napisany względem źródeł
-  interpretera/kompilatora H#, ale — tak jak nowy kod graficzny
-  powyżej — nigdy nie przepuszczony przez realny `h#` w tym
-  środowisku (brak pełnego środowiska budowania z LLVM 21). Ta część
-  się nie zmieniła.
+Szczegóły w `docs/CHANGELOG.md`: ucięty zestaw plików (brakujące moduły silnika
+tekstowego i `build.sh`), błąd składni w `h2d_texture.h#`, nieistniejące
+`queue_new()` i DFS zamiast BFS w `h2d_pathfind`, błędne `io_read_line`,
+zły format pikseli i zły odczyt `bytes` w teksturach, gubienie szybkich kliknięć
+i klawiszy w obrębie jednej klatki, przypadkowe nadpisywanie dźwięków w pełnej tablicy,
+`extern dynamic` jako jedyny tryb.
