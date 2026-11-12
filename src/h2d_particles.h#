@@ -1,0 +1,120 @@
+mod h2d_vec2
+mod h2d_color
+mod h2d_gfx
+mod h2d_random
+
+;; Particle system for the pixel engine: sparks, smoke, explosions, dust,
+;; pickups. All particles live in one ParticleSystem value.
+;;
+;;   let mut fx: h2d_particles::ParticleSystem = h2d_particles::new_system(42)
+;;   fx = h2d_particles::burst(fx, pos, 24, 60.0, 220.0, 0.6, 5.0, h2d_color::orange(), h2d_color::red())
+;;   ... every frame:  fx = h2d_particles::update(fx, dt)
+;;                     h2d_particles::draw(fx, 0.0, 0.0)
+
+pub struct Particle is
+    pub pos:      h2d_vec2::Vec2
+    pub vel:      h2d_vec2::Vec2
+    pub life:     f64            ;; seconds left
+    pub max_life: f64
+    pub size0:    f64            ;; radius at birth
+    pub size1:    f64            ;; radius at death
+    pub color0:   h2d_color::Color
+    pub color1:   h2d_color::Color
+end
+
+pub struct ParticleSystem is
+    pub particles: [Particle]
+    pub gravity:   h2d_vec2::Vec2     ;; pixels/second^2 applied to every particle
+    pub drag:      f64                ;; 0 = none; 1.0 = lose ~63% velocity per second
+    pub additive:  bool               ;; glow blending when drawing
+    pub max_count: int                ;; hard cap (oldest not removed: new ones are dropped)
+    pub rng:       h2d_random::Rng
+end
+
+pub fn new_system(seed: int) -> ParticleSystem is
+    return ParticleSystem { particles: [], gravity: h2d_vec2::vec2(0.0, 0.0), drag: 0.0, additive: false, max_count: 2000, rng: h2d_random::new_rng(seed) }
+end
+
+pub fn set_gravity(mut ps: ParticleSystem, gx: f64, gy: f64) -> ParticleSystem is
+    ps.gravity = h2d_vec2::vec2(gx, gy)
+    return ps
+end
+
+pub fn set_additive(mut ps: ParticleSystem, on: bool) -> ParticleSystem is
+    ps.additive = on
+    return ps
+end
+
+pub fn set_drag(mut ps: ParticleSystem, drag: f64) -> ParticleSystem is
+    ps.drag = drag
+    return ps
+end
+
+pub fn count(ps: ParticleSystem) -> int is
+    return ps.particles.len()
+end
+
+;; `count` particles flying out in all directions from `pos`, each with a
+;; random speed in [speed_min, speed_max], living `life` seconds (+-25%),
+;; shrinking from `size` to 0 and fading colour0 -> colour1.
+pub fn burst(mut ps: ParticleSystem, pos: h2d_vec2::Vec2, count: int, speed_min: f64, speed_max: f64, life: f64, size: f64, color0: h2d_color::Color, color1: h2d_color::Color) -> ParticleSystem is
+    return cone(ps, pos, count, 0.0, 360.0, speed_min, speed_max, life, size, color0, color1)
+end
+
+;; Like burst, but only within a cone: `angle_deg` is the centre direction
+;; (0 = right, 90 = down, 270 = up), `spread_deg` the total width.
+pub fn cone(mut ps: ParticleSystem, pos: h2d_vec2::Vec2, count: int, angle_deg: f64, spread_deg: f64, speed_min: f64, speed_max: f64, life: f64, size: f64, color0: h2d_color::Color, color1: h2d_color::Color) -> ParticleSystem is
+    let mut i: int = 0
+    while i < count && ps.particles.len() < ps.max_count is
+        let ra = h2d_random::rng_range_f(ps.rng, angle_deg - spread_deg / 2.0, angle_deg + spread_deg / 2.0)
+        let rs = h2d_random::rng_range_f(ra.0, speed_min, speed_max)
+        let rl = h2d_random::rng_range_f(rs.0, 0.75, 1.25)
+        ps.rng = rl.0
+        let dir: h2d_vec2::Vec2 = h2d_vec2::from_angle_deg(ra.1)
+        let l: f64 = life * rl.1
+        ps.particles.push(Particle {
+            pos: pos, vel: dir.scale(rs.1), life: l, max_life: l,
+            size0: size, size1: 0.0, color0: color0, color1: color1,
+        })
+        i += 1
+    end
+    return ps
+end
+
+;; Advances every particle and drops the dead ones.
+pub fn update(mut ps: ParticleSystem, dt: f64) -> ParticleSystem is
+    let mut alive: [Particle] = []
+    let damp: f64 = if ps.drag > 0.0 then 1.0 - ps.drag * dt else 1.0
+    let mut i: int = 0
+    while i < ps.particles.len() is
+        let mut p: Particle = ps.particles[i]
+        p.life -= dt
+        if p.life > 0.0 is
+            p.vel = h2d_vec2::vec2((p.vel.x + ps.gravity.x * dt) * (if damp > 0.0 then damp else 0.0), (p.vel.y + ps.gravity.y * dt) * (if damp > 0.0 then damp else 0.0))
+            p.pos = h2d_vec2::vec2(p.pos.x + p.vel.x * dt, p.pos.y + p.vel.y * dt)
+            alive.push(p)
+        end
+        i += 1
+    end
+    ps.particles = alive
+    return ps
+end
+
+;; Draws all particles as filled circles. (off_x, off_y) is added to every
+;; position — pass the camera's world->screen offset, or 0.0, 0.0 when the
+;; particles are already in screen space.
+pub fn draw(ps: ParticleSystem, off_x: f64, off_y: f64) is
+    if ps.additive is h2d_gfx::set_blend_mode(h2d_gfx::blend_add()) end
+    let mut i: int = 0
+    while i < ps.particles.len() is
+        let p: Particle = ps.particles[i]
+        let t: f64 = 1.0 - p.life / p.max_life
+        let c: h2d_color::Color = h2d_color::lerp(p.color0, p.color1, t)
+        let r: f64 = p.size0 + (p.size1 - p.size0) * t
+        if r >= 0.5 is
+            h2d_gfx::draw_circle(p.pos.x + off_x, p.pos.y + off_y, r, c)
+        end
+        i += 1
+    end
+    if ps.additive is h2d_gfx::set_blend_mode(h2d_gfx::blend_alpha()) end
+end
