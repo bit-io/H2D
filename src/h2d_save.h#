@@ -1,0 +1,128 @@
+use "std -> fs" from "fs"
+use "std -> strings" from "str"
+use "std -> conv" from "conv"
+
+;; Tiny persistent key/value store for settings, high scores and savegames:
+;; a plain text file with one `key=value` per line (human-editable).
+;;
+;;   let mut sv: h2d_save::Save = h2d_save::load("save.dat")
+;;   let best: int = h2d_save::get_int(sv, "highscore", 0)
+;;   sv = h2d_save::set_int(sv, "highscore", score)
+;;   h2d_save::commit(sv)
+
+pub struct Save is
+    pub path: string
+    pub keys: [string]
+    pub vals: [string]
+end
+
+pub fn new_save(path: string) -> Save is
+    return Save { path: path, keys: [], vals: [] }
+end
+
+;; Reads the file if it exists; a missing/unreadable file gives an empty save.
+pub fn load(path: string) -> Save is
+    let mut sv: Save = new_save(path)
+    if !fs::exists(path) is return sv end
+    let lines: [string] = fs::read_lines(path)
+    let mut i: int = 0
+    while i < lines.len() is
+        let line: string = str::trim(lines[i])
+        let eq: int = str::index_of(line, "=")
+        if line.len() > 0 && eq > 0 is
+            sv.keys.push(str::trim(str::slice(line, 0, eq)))
+            sv.vals.push(str::slice(line, eq + 1, line.len()))
+        end
+        i += 1
+    end
+    return sv
+end
+
+fn find(sv: Save, key: string) -> int is
+    let mut i: int = 0
+    while i < sv.keys.len() is
+        if sv.keys[i] == key is return i end
+        i += 1
+    end
+    return 0 - 1
+end
+
+pub fn has(sv: Save, key: string) -> bool is
+    return find(sv, key) >= 0
+end
+
+pub fn get_str(sv: Save, key: string, default_value: string) -> string is
+    let i: int = find(sv, key)
+    if i < 0 is return default_value end
+    return sv.vals[i]
+end
+
+pub fn get_int(sv: Save, key: string, default_value: int) -> int is
+    let i: int = find(sv, key)
+    if i < 0 is return default_value end
+    return conv::str_to_int(sv.vals[i])
+end
+
+pub fn get_f64(sv: Save, key: string, default_value: f64) -> f64 is
+    let i: int = find(sv, key)
+    if i < 0 is return default_value end
+    return conv::str_to_float(sv.vals[i])
+end
+
+pub fn get_bool(sv: Save, key: string, default_value: bool) -> bool is
+    let i: int = find(sv, key)
+    if i < 0 is return default_value end
+    return sv.vals[i] == "true"
+end
+
+;; Values may not contain newlines (they are flattened to spaces).
+pub fn set_str(mut sv: Save, key: string, value: string) -> Save is
+    let clean: string = str::replace_all(value, "\n", " ")
+    let i: int = find(sv, key)
+    if i < 0 is
+        sv.keys.push(key)
+        sv.vals.push(clean)
+    else is
+        sv.vals[i] = clean
+    end
+    return sv
+end
+
+pub fn set_int(mut sv: Save, key: string, value: int) -> Save is
+    return set_str(sv, key, to_string(value))
+end
+
+pub fn set_f64(mut sv: Save, key: string, value: f64) -> Save is
+    return set_str(sv, key, to_string(value))
+end
+
+pub fn set_bool(mut sv: Save, key: string, value: bool) -> Save is
+    return set_str(sv, key, if value then "true" else "false")
+end
+
+pub fn remove_key(mut sv: Save, key: string) -> Save is
+    let mut ks: [string] = []
+    let mut vs: [string] = []
+    let mut i: int = 0
+    while i < sv.keys.len() is
+        if sv.keys[i] != key is
+            ks.push(sv.keys[i])
+            vs.push(sv.vals[i])
+        end
+        i += 1
+    end
+    sv.keys = ks
+    sv.vals = vs
+    return sv
+end
+
+;; Writes the file. Returns false if it could not be written.
+pub fn commit(sv: Save) -> bool is
+    let mut out: string = ""
+    let mut i: int = 0
+    while i < sv.keys.len() is
+        out = out + sv.keys[i] + "=" + sv.vals[i] + "\n"
+        i += 1
+    end
+    return fs::write(sv.path, out)
+end
