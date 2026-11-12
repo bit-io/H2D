@@ -1,0 +1,25 @@
+mod h2d_canvas
+mod h2d_entity
+mod h2d_timer
+;; Convenience bundle for the text engine: Canvas + World + Clock + running.
+;; Graphics-engine counterpart: h2d_app2d.h#.
+pub struct App is
+    pub canvas:  h2d_canvas::Canvas
+    pub world:   h2d_entity::World
+    pub clock:   h2d_timer::Clock
+    pub running: bool
+end
+
+pub fn new_app(width: int, height: int) -> App is
+    return App {
+        canvas: h2d_canvas::new_canvas(width, height),
+        world: h2d_entity::new_world(),
+        clock: h2d_timer::new_clock(),
+        running: true,
+    }
+end
+
+pub fn quit(mut app: App) -> App is
+    app.running = false
+    return app
+end
