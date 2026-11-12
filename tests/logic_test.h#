@@ -1,0 +1,305 @@
+use "std -> test" from "test"
+use "std -> fs" from "fs"
+mod h2d_vec2
+mod h2d_color
+mod h2d_tween
+mod h2d_random
+mod h2d_timer
+mod h2d_tiles2d
+mod h2d_physics2d
+mod h2d_collision2d
+mod h2d_scene
+mod h2d_save
+mod h2d_particles
+mod h2d_collision
+mod h2d_camera2d
+mod h2d_camera
+mod h2d_anim
+mod h2d_pathfind
+mod h2d_tilemap
+
+fn near(a: f64, b: f64) -> bool is
+    let d: f64 = a - b
+    return d < 0.001 && d > 0.0 - 0.001
+end
+
+#[test]
+fn test_vec2() is
+    let v: h2d_vec2::Vec2 = h2d_vec2::vec2(3.0, 4.0)
+    assert_true(near(v.length(), 5.0))
+    assert_true(near(v.length_sq(), 25.0))
+    assert_true(near(h2d_vec2::lerp(h2d_vec2::vec2(0.0, 0.0), h2d_vec2::vec2(10.0, 20.0), 0.5).y, 10.0))
+    let r: h2d_vec2::Vec2 = h2d_vec2::vec2(1.0, 0.0).rotated(90.0)
+    assert_true(near(r.x, 0.0) && near(r.y, 1.0))
+    assert_eq(h2d_vec2::floor_int(0.0 - 0.5), -1)
+    assert_eq(h2d_vec2::floor_int(2.9), 2)
+    assert_true(near(h2d_vec2::vec2(0.0, 5.0).angle_deg(), 90.0))
+end
+
+#[test]
+fn test_color() is
+    let c: h2d_color::Color = h2d_color::from_hex(0xff8800)
+    assert_eq(c.r, 255)
+    assert_eq(c.g, 136)
+    assert_eq(c.b, 0)
+    let m: h2d_color::Color = h2d_color::lerp(h2d_color::black(), h2d_color::white(), 0.5)
+    assert_eq(m.r, 127)
+    let red: h2d_color::Color = h2d_color::from_hsv(0.0, 1.0, 1.0)
+    assert_eq(red.r, 255)
+    assert_eq(red.g, 0)
+    let green: h2d_color::Color = h2d_color::from_hsv(120.0, 1.0, 1.0)
+    assert_eq(green.g, 255)
+    assert_eq(green.r, 0)
+end
+
+#[test]
+fn test_tween() is
+    assert_true(near(h2d_tween::ease(h2d_tween::linear(), 0.5), 0.5))
+    assert_true(near(h2d_tween::ease(h2d_tween::out_quad(), 1.0), 1.0))
+    assert_true(near(h2d_tween::ease(h2d_tween::out_bounce(), 1.0), 1.0))
+    assert_true(near(h2d_tween::ease(h2d_tween::out_elastic(), 0.0), 0.0))
+    let mut t: h2d_tween::Tween = h2d_tween::new_tween(10.0, 20.0, 1.0, h2d_tween::linear())
+    t = h2d_tween::update(t, 0.5)
+    assert_true(near(h2d_tween::value(t), 15.0))
+    assert_false(h2d_tween::is_finished(t))
+    t = h2d_tween::update(t, 0.6)
+    assert_true(h2d_tween::is_finished(t))
+    assert_true(near(h2d_tween::value(t), 20.0))
+end
+
+#[test]
+fn test_rng_is_deterministic() is
+    let mut a: h2d_random::Rng = h2d_random::new_rng(1234)
+    let mut b: h2d_random::Rng = h2d_random::new_rng(1234)
+    let mut i: int = 0
+    while i < 50 is
+        let x = h2d_random::rng_range(a, 1, 6)
+        let y = h2d_random::rng_range(b, 1, 6)
+        a = x.0
+        b = y.0
+        assert_eq(x.1, y.1)
+        assert_true(x.1 >= 1 && x.1 <= 6)
+        i += 1
+    end
+    let f = h2d_random::rng_f64(a)
+    assert_true(f.1 >= 0.0 && f.1 < 1.0)
+end
+
+#[test]
+fn test_cooldown_and_timer() is
+    let mut c: h2d_timer::Cooldown = h2d_timer::new_cooldown(1.0)
+    assert_true(h2d_timer::cooldown_ready(c))
+    c = h2d_timer::cooldown_start(c)
+    assert_false(h2d_timer::cooldown_ready(c))
+    c = h2d_timer::cooldown_tick(c, 0.4)
+    assert_true(near(h2d_timer::cooldown_progress(c), 0.4))
+    c = h2d_timer::cooldown_tick(c, 0.7)
+    assert_true(h2d_timer::cooldown_ready(c))
+    let mut t: h2d_timer::Timer = h2d_timer::new_timer(0.5, true)
+    t = h2d_timer::timer_tick(t, 0.3)
+    assert_false(h2d_timer::timer_fired(t))
+    t = h2d_timer::timer_tick(t, 0.3)
+    assert_true(h2d_timer::timer_fired(t))
+    t = h2d_timer::timer_tick(t, 0.1)
+    assert_false(h2d_timer::timer_fired(t))
+end
+
+fn level() -> h2d_tiles2d::TileMap2D is
+    let rows: [string] = [
+        "##########",
+        "#........#",
+        "#........#",
+        "#..###...#",
+        "##########",
+    ]
+    let mut m: h2d_tiles2d::TileMap2D = h2d_tiles2d::from_rows(rows, "#", 16, 16)
+    m = h2d_tiles2d::set_solid(m, [1])
+    return m
+end
+
+#[test]
+fn test_tilemap() is
+    let m: h2d_tiles2d::TileMap2D = level()
+    assert_eq(m.width, 10)
+    assert_eq(m.height, 5)
+    assert_eq(h2d_tiles2d::get_tile(m, 0, 0), 1)
+    assert_eq(h2d_tiles2d::get_tile(m, 1, 1), 0)
+    assert_true(h2d_tiles2d::is_solid_tile(m, 3, 3))
+    assert_false(h2d_tiles2d::is_solid_tile(m, 1, 2))
+    assert_true(h2d_tiles2d::is_solid_tile(m, 0 - 1, 0))
+    assert_true(h2d_tiles2d::is_solid_at(m, 56.0, 50.0))
+    assert_false(h2d_tiles2d::rect_hits_solid(m, 16.0, 16.0, 14.0, 14.0))
+    assert_true(h2d_tiles2d::rect_hits_solid(m, 40.0, 40.0, 10.0, 10.0))
+    assert_eq(h2d_tiles2d::count_tiles(m, 1), 29)
+    let csv: h2d_tiles2d::TileMap2D = h2d_tiles2d::from_csv("1,0,2\n0,3,0\n", 8, 8)
+    assert_eq(csv.width, 3)
+    assert_eq(csv.height, 2)
+    assert_eq(h2d_tiles2d::get_tile(csv, 2, 0), 2)
+    assert_eq(h2d_tiles2d::get_tile(csv, 1, 1), 3)
+end
+
+#[test]
+fn test_body_falls_and_lands() is
+    let m: h2d_tiles2d::TileMap2D = level()
+    let mut b: h2d_physics2d::Body = h2d_physics2d::new_body(20.0, 20.0, 10.0, 12.0)
+    let mut i: int = 0
+    while i < 120 is
+        b = h2d_physics2d::apply_gravity(b, 900.0, 600.0, 1.0 / 60.0)
+        b = h2d_physics2d::move_body(b, m, 1.0 / 60.0)
+        i += 1
+    end
+    ;; floor row is y = 4 -> top at 64; body height 12 -> rests at y ~ 52
+    assert_true(b.on_ground)
+    assert_true(near(b.pos.y, 52.0 - 0.001) || (b.pos.y > 51.9 && b.pos.y < 52.0))
+    assert_true(near(b.vel.y, 0.0))
+end
+
+#[test]
+fn test_body_stops_at_wall_and_never_tunnels() is
+    let m: h2d_tiles2d::TileMap2D = level()
+    let mut b: h2d_physics2d::Body = h2d_physics2d::new_body(40.0, 20.0, 10.0, 12.0)
+    b.vel.x = 50000.0          ;; absurdly fast: must still stop at the right wall (x = 9*16 = 144)
+    b = h2d_physics2d::move_body(b, m, 1.0 / 60.0)
+    assert_true(b.hit_right)
+    assert_true(b.pos.x + b.w <= 144.0)
+    b.vel.x = 0.0 - 50000.0
+    b = h2d_physics2d::move_body(b, m, 1.0 / 60.0)
+    assert_true(b.hit_left)
+    assert_true(b.pos.x >= 16.0)
+end
+
+#[test]
+fn test_jump_with_coyote_time() is
+    let m: h2d_tiles2d::TileMap2D = level()
+    let mut b: h2d_physics2d::Body = h2d_physics2d::new_body(20.0, 20.0, 10.0, 12.0)
+    let mut i: int = 0
+    while i < 90 is
+        b = h2d_physics2d::apply_gravity(b, 900.0, 600.0, 1.0 / 60.0)
+        b = h2d_physics2d::move_body(b, m, 1.0 / 60.0)
+        i += 1
+    end
+    assert_true(b.on_ground)
+    b = h2d_physics2d::jump(b, 300.0, 0.1)
+    assert_true(b.vel.y < 0.0)
+    b = h2d_physics2d::apply_gravity(b, 900.0, 600.0, 1.0 / 60.0)
+    b = h2d_physics2d::move_body(b, m, 1.0 / 60.0)
+    assert_false(b.on_ground)
+    ;; airborne and past the coyote window: a second jump is refused
+    let vy: f64 = b.vel.y
+    b.air_time = 1.0
+    b = h2d_physics2d::jump(b, 300.0, 0.1)
+    assert_true(near(b.vel.y, vy))
+end
+
+#[test]
+fn test_collision2d() is
+    assert_true(h2d_collision2d::rects_intersect(0.0, 0.0, 10.0, 10.0, 5.0, 5.0, 10.0, 10.0))
+    assert_false(h2d_collision2d::rects_intersect(0.0, 0.0, 10.0, 10.0, 10.0, 0.0, 5.0, 5.0))
+    let sep = h2d_collision2d::separation_vector(0.0, 0.0, 10.0, 10.0, 8.0, 2.0, 10.0, 10.0)
+    assert_true(near(sep.0, 0.0 - 2.0) && near(sep.1, 0.0))
+    assert_true(h2d_collision2d::segment_hits_rect(0.0, 5.0, 100.0, 5.0, 40.0, 0.0, 10.0, 10.0))
+    assert_false(h2d_collision2d::segment_hits_rect(0.0, 50.0, 100.0, 50.0, 40.0, 0.0, 10.0, 10.0))
+    assert_true(h2d_collision2d::point_in_circle(1.0, 1.0, 0.0, 0.0, 2.0))
+end
+
+#[test]
+fn test_scene_transition() is
+    let mut s: h2d_scene::Scenes = h2d_scene::new_scenes(0)
+    assert_true(h2d_scene::just_entered(s))
+    s = h2d_scene::update(s, 0.016)
+    assert_false(h2d_scene::just_entered(s))
+    s = h2d_scene::change(s, 2)
+    assert_true(h2d_scene::is_transitioning(s))
+    let mut i: int = 0
+    let mut entered_at: int = 0 - 1
+    while i < 100 is
+        s = h2d_scene::update(s, 0.016)
+        if h2d_scene::just_entered(s) is entered_at = i end
+        i += 1
+    end
+    assert_eq(s.current, 2)
+    assert_true(entered_at >= 0)
+    assert_false(h2d_scene::is_transitioning(s))
+end
+
+#[test]
+fn test_save_roundtrip() is
+    let path: string = "/tmp/h2d_test_save.dat"
+    let mut sv: h2d_save::Save = h2d_save::new_save(path)
+    sv = h2d_save::set_int(sv, "highscore", 4200)
+    sv = h2d_save::set_str(sv, "name", "Zażółć")
+    sv = h2d_save::set_bool(sv, "music", true)
+    sv = h2d_save::set_f64(sv, "volume", 0.75)
+    sv = h2d_save::set_int(sv, "highscore", 5000)
+    assert_true(h2d_save::commit(sv))
+    let back: h2d_save::Save = h2d_save::load(path)
+    assert_eq(h2d_save::get_int(back, "highscore", 0), 5000)
+    assert_eq(h2d_save::get_str(back, "name", ""), "Zażółć")
+    assert_true(h2d_save::get_bool(back, "music", false))
+    assert_true(near(h2d_save::get_f64(back, "volume", 0.0), 0.75))
+    assert_eq(h2d_save::get_int(back, "missing", 7), 7)
+    fs::remove(path)
+end
+
+#[test]
+fn test_particles_update() is
+    let mut ps: h2d_particles::ParticleSystem = h2d_particles::new_system(7)
+    ps = h2d_particles::burst(ps, h2d_vec2::vec2(100.0, 100.0), 30, 50.0, 100.0, 0.5, 4.0, h2d_color::white(), h2d_color::red())
+    assert_eq(h2d_particles::count(ps), 30)
+    let mut i: int = 0
+    while i < 100 is
+        ps = h2d_particles::update(ps, 0.02)
+        i += 1
+    end
+    assert_eq(h2d_particles::count(ps), 0)
+end
+
+#[test]
+fn test_camera2d() is
+    let mut cam: h2d_camera2d::Camera2D = h2d_camera2d::new_camera2d_centered(800, 600)
+    cam = h2d_camera2d::set_target(cam, h2d_vec2::vec2(100.0, 100.0))
+    let s: h2d_vec2::Vec2 = h2d_camera2d::to_screen(cam, h2d_vec2::vec2(100.0, 100.0))
+    assert_true(near(s.x, 400.0) && near(s.y, 300.0))
+    let w: h2d_vec2::Vec2 = h2d_camera2d::to_world(cam, s)
+    assert_true(near(w.x, 100.0) && near(w.y, 100.0))
+    cam = h2d_camera2d::shake(cam, 10.0)
+    cam = h2d_camera2d::update(cam, 0.016)
+    assert_true(cam.shake_power > 0.0)
+    let mut i: int = 0
+    while i < 200 is
+        cam = h2d_camera2d::update(cam, 0.016)
+        i += 1
+    end
+    assert_true(near(cam.shake_power, 0.0))
+    ;; smooth follow converges
+    let mut c2: h2d_camera2d::Camera2D = h2d_camera2d::new_camera2d_centered(800, 600)
+    i = 0
+    while i < 120 is
+        c2 = h2d_camera2d::follow_smooth(c2, h2d_vec2::vec2(500.0, 0.0), 6.0, 1.0 / 60.0)
+        i += 1
+    end
+    assert_true(c2.target.x > 490.0)
+end
+
+;; ── text engine (restored modules) ──────────────────────────────────────
+
+#[test]
+fn test_text_engine_modules() is
+    assert_eq(h2d_collision::manhattan(0, 0, 3, 4), 7)
+    assert_true(h2d_collision::point_in_rect(1, 1, 0, 0, 2, 2))
+    let nx: [int] = h2d_collision::neighbors_x(5)
+    let ny: [int] = h2d_collision::neighbors_y(5)
+    assert_eq(nx.len(), 4)
+    assert_eq(ny[0], 4)
+    let mut cam: h2d_camera::Camera = h2d_camera::new_camera(10, 5)
+    cam = h2d_camera::follow(cam, 50, 50, 100, 100)
+    assert_true(h2d_camera::is_visible(cam, 50, 50))
+    assert_eq(h2d_camera::to_screen_x(cam, 50), 5)
+    let mut a: h2d_anim::Anim = h2d_anim::new_anim(["a", "b", "c"], 100, true)
+    a = h2d_anim::update(a, 250)
+    assert_eq(h2d_anim::current_frame(a), "c")
+    let map: h2d_tilemap::Tilemap = h2d_tilemap::from_rows(["#####", "#...#", "#####"])
+    let path = h2d_pathfind::bfs_path(map, 1, 1, 3, 1, "#")
+    assert_true(path.0)
+    assert_eq(path.1.len(), 3)
+end
