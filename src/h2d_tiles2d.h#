@@ -1,0 +1,286 @@
+mod h2d_vec2
+mod h2d_color
+mod h2d_texture
+mod h2d_gfx
+mod h2d_camera2d
+use "std -> strings" from "str"
+use "std -> conv" from "conv"
+
+;; Graphical tile maps for the pixel engine (the text engine's grid map is
+;; h2d_tilemap.h#). A map is a grid of integer tile ids: 0 = empty, 1..N =
+;; tiles. Ids index into a Tileset (a texture atlas) or, with no art at
+;; all, into a palette of flat colours — so a prototype needs zero assets.
+;;
+;; Coordinates: tile (tx, ty) covers world pixels
+;; [tx*tile_w, (tx+1)*tile_w) x [ty*tile_h, (ty+1)*tile_h).
+
+pub struct TileMap2D is
+    pub width:   int          ;; in tiles
+    pub height:  int
+    pub tile_w:  int          ;; in pixels
+    pub tile_h:  int
+    pub tiles:   [int]        ;; row-major, length width*height
+    pub solid:   [int]        ;; tile ids that block bodies
+    pub outside_solid: bool   ;; are tiles outside the map solid? (true = closed room)
+end
+
+pub struct Tileset is
+    pub texture: h2d_texture::Texture2D
+    pub tile_w:  int
+    pub tile_h:  int
+    pub columns: int
+end
+
+pub fn new_tilemap(width: int, height: int, tile_w: int, tile_h: int) -> TileMap2D is
+    let mut t: [int] = []
+    let mut i: int = 0
+    while i < width * height is
+        t.push(0)
+        i += 1
+    end
+    return TileMap2D { width: width, height: height, tile_w: tile_w, tile_h: tile_h, tiles: t, solid: [], outside_solid: true }
+end
+
+;; Hand-made levels as text. Each character of `legend` is a tile id in
+;; order (first char = id 1, second = id 2, ...); any other character
+;; (space, '.') is empty. All rows should have the same length.
+;;
+;;   rows   = ["#######", "#.....#", "#..#..#", "#######"]
+;;   legend = "#"        ->  '#' is tile 1
+pub fn from_rows(rows: [string], legend: string, tile_w: int, tile_h: int) -> TileMap2D is
+    let h: int = rows.len()
+    let mut w: int = 0
+    let mut r: int = 0
+    while r < h is
+        if rows[r].len() > w is w = rows[r].len() end
+        r += 1
+    end
+    let mut map: TileMap2D = new_tilemap(w, h, tile_w, tile_h)
+    r = 0
+    while r < h is
+        let mut c: int = 0
+        while c < rows[r].len() is
+            let ch: string = str::slice(rows[r], c, c + 1)
+            let idx: int = str::index_of(legend, ch)
+            if idx >= 0 is
+                map.tiles[r * w + c] = idx + 1
+            end
+            c += 1
+        end
+        r += 1
+    end
+    return map
+end
+
+;; Loads comma-separated rows of ids — the "CSV" layer export of the Tiled
+;; map editor (tiled: id 0 = empty; ids start at 1 for the first tile).
+pub fn from_csv(csv: string, tile_w: int, tile_h: int) -> TileMap2D is
+    let lines: [string] = str::split(csv, "\n")
+    let mut rows: [[int]] = []
+    let mut w: int = 0
+    let mut i: int = 0
+    while i < lines.len() is
+        let line: string = str::trim(lines[i])
+        if line.len() > 0 is
+            let parts: [string] = str::split(line, ",")
+            let mut row: [int] = []
+            let mut j: int = 0
+            while j < parts.len() is
+                let p: string = str::trim(parts[j])
+                if p.len() > 0 is row.push(conv::str_to_int(p)) end
+                j += 1
+            end
+            if row.len() > w is w = row.len() end
+            rows.push(row)
+        end
+        i += 1
+    end
+    let mut map: TileMap2D = new_tilemap(w, rows.len(), tile_w, tile_h)
+    let mut y: int = 0
+    while y < rows.len() is
+        let mut x: int = 0
+        while x < rows[y].len() is
+            map.tiles[y * w + x] = rows[y][x]
+            x += 1
+        end
+        y += 1
+    end
+    return map
+end
+
+;; Ids that block bodies (h2d_physics2d) and answer is_solid_tile().
+pub fn set_solid(mut map: TileMap2D, ids: [int]) -> TileMap2D is
+    map.solid = ids
+    return map
+end
+
+pub fn set_outside_solid(mut map: TileMap2D, v: bool) -> TileMap2D is
+    map.outside_solid = v
+    return map
+end
+
+pub fn pixel_width(map: TileMap2D) -> f64 is
+    return (map.width * map.tile_w) + 0.0
+end
+
+pub fn pixel_height(map: TileMap2D) -> f64 is
+    return (map.height * map.tile_h) + 0.0
+end
+
+pub fn in_bounds(map: TileMap2D, tx: int, ty: int) -> bool is
+    return tx >= 0 && ty >= 0 && tx < map.width && ty < map.height
+end
+
+;; Tile id at tile coordinates; 0 outside the map.
+pub fn get_tile(map: TileMap2D, tx: int, ty: int) -> int is
+    if !in_bounds(map, tx, ty) is return 0 end
+    return map.tiles[ty * map.width + tx]
+end
+
+pub fn set_tile(mut map: TileMap2D, tx: int, ty: int, id: int) -> TileMap2D is
+    if in_bounds(map, tx, ty) is
+        map.tiles[ty * map.width + tx] = id
+    end
+    return map
+end
+
+pub fn is_solid_id(map: TileMap2D, id: int) -> bool is
+    let mut i: int = 0
+    while i < map.solid.len() is
+        if map.solid[i] == id is return true end
+        i += 1
+    end
+    return false
+end
+
+;; Is the tile at (tx, ty) solid? Outside the map follows `outside_solid`.
+pub fn is_solid_tile(map: TileMap2D, tx: int, ty: int) -> bool is
+    if !in_bounds(map, tx, ty) is return map.outside_solid end
+    return is_solid_id(map, map.tiles[ty * map.width + tx])
+end
+
+pub fn tile_x_at(map: TileMap2D, px: f64) -> int is
+    return h2d_vec2::floor_int(px / (map.tile_w + 0.0))
+end
+
+pub fn tile_y_at(map: TileMap2D, py: f64) -> int is
+    return h2d_vec2::floor_int(py / (map.tile_h + 0.0))
+end
+
+;; Is the world point inside a solid tile?
+pub fn is_solid_at(map: TileMap2D, px: f64, py: f64) -> bool is
+    return is_solid_tile(map, tile_x_at(map, px), tile_y_at(map, py))
+end
+
+;; Does the rectangle (x, y, w, h) touch any solid tile? (Right/bottom edges
+;; are exclusive, so a body standing exactly on a tile edge does not collide.)
+pub fn rect_hits_solid(map: TileMap2D, x: f64, y: f64, w: f64, h: f64) -> bool is
+    let tx0: int = tile_x_at(map, x)
+    let ty0: int = tile_y_at(map, y)
+    let tx1: int = tile_x_at(map, x + w - 0.0001)
+    let ty1: int = tile_y_at(map, y + h - 0.0001)
+    let mut ty: int = ty0
+    while ty <= ty1 is
+        let mut tx: int = tx0
+        while tx <= tx1 is
+            if is_solid_tile(map, tx, ty) is return true end
+            tx += 1
+        end
+        ty += 1
+    end
+    return false
+end
+
+;; Count tiles with this id (coins left, enemies to place, ...).
+pub fn count_tiles(map: TileMap2D, id: int) -> int is
+    let mut n: int = 0
+    let mut i: int = 0
+    while i < map.tiles.len() is
+        if map.tiles[i] == id is n += 1 end
+        i += 1
+    end
+    return n
+end
+
+;; Pixel position of the first tile with this id (top-left), or (-1, -1).
+;; Handy for placing the player: put a marker id in the map, find it, clear it.
+pub fn find_tile(map: TileMap2D, id: int) -> h2d_vec2::Vec2 is
+    let mut i: int = 0
+    while i < map.tiles.len() is
+        if map.tiles[i] == id is
+            return h2d_vec2::vec2(((i % map.width) * map.tile_w) + 0.0, ((i / map.width) * map.tile_h) + 0.0)
+        end
+        i += 1
+    end
+    return h2d_vec2::vec2(0.0 - 1.0, 0.0 - 1.0)
+end
+
+pub fn new_tileset(texture: h2d_texture::Texture2D, tile_w: int, tile_h: int) -> Tileset is
+    let mut cols: int = 1
+    if tile_w > 0 is cols = texture.width / tile_w end
+    if cols < 1 is cols = 1 end
+    return Tileset { texture: texture, tile_w: tile_w, tile_h: tile_h, columns: cols }
+end
+
+;; Draws only the tiles visible through `cam` (viewport = the current
+;; screen size), scaled by the camera zoom. Id n is cell (n-1) of the tileset.
+pub fn draw(map: TileMap2D, set: Tileset, cam: h2d_camera2d::Camera2D, view_w: int, view_h: int) is
+    let tl: h2d_vec2::Vec2 = h2d_camera2d::to_world(cam, h2d_vec2::vec2(0.0, 0.0))
+    let br: h2d_vec2::Vec2 = h2d_camera2d::to_world(cam, h2d_vec2::vec2(view_w + 0.0, view_h + 0.0))
+    let mut tx0: int = tile_x_at(map, tl.x)
+    let mut ty0: int = tile_y_at(map, tl.y)
+    let mut tx1: int = tile_x_at(map, br.x)
+    let mut ty1: int = tile_y_at(map, br.y)
+    if tx0 < 0 is tx0 = 0 end
+    if ty0 < 0 is ty0 = 0 end
+    if tx1 >= map.width is tx1 = map.width - 1 end
+    if ty1 >= map.height is ty1 = map.height - 1 end
+    let dw: f64 = (map.tile_w + 0.0) * cam.zoom
+    let dh: f64 = (map.tile_h + 0.0) * cam.zoom
+    let white: h2d_color::Color = h2d_color::white()
+    let mut ty: int = ty0
+    while ty <= ty1 is
+        let mut tx: int = tx0
+        while tx <= tx1 is
+            let id: int = map.tiles[ty * map.width + tx]
+            if id > 0 is
+                let sp: h2d_vec2::Vec2 = h2d_camera2d::to_screen(cam, h2d_vec2::vec2((tx * map.tile_w) + 0.0, (ty * map.tile_h) + 0.0))
+                let col: int = (id - 1) % set.columns
+                let row: int = (id - 1) / set.columns
+                h2d_texture::draw_texture_rec(set.texture, (col * set.tile_w) + 0.0, (row * set.tile_h) + 0.0, set.tile_w + 0.0, set.tile_h + 0.0, sp.x, sp.y, dw + 0.5, dh + 0.5, white)
+            end
+            tx += 1
+        end
+        ty += 1
+    end
+end
+
+;; Same culling, but each id is a flat colour: palette[id - 1]. For
+;; prototypes, debug views, and games drawn entirely from rectangles.
+pub fn draw_flat(map: TileMap2D, palette: [h2d_color::Color], cam: h2d_camera2d::Camera2D, view_w: int, view_h: int) is
+    let tl: h2d_vec2::Vec2 = h2d_camera2d::to_world(cam, h2d_vec2::vec2(0.0, 0.0))
+    let br: h2d_vec2::Vec2 = h2d_camera2d::to_world(cam, h2d_vec2::vec2(view_w + 0.0, view_h + 0.0))
+    let mut tx0: int = tile_x_at(map, tl.x)
+    let mut ty0: int = tile_y_at(map, tl.y)
+    let mut tx1: int = tile_x_at(map, br.x)
+    let mut ty1: int = tile_y_at(map, br.y)
+    if tx0 < 0 is tx0 = 0 end
+    if ty0 < 0 is ty0 = 0 end
+    if tx1 >= map.width is tx1 = map.width - 1 end
+    if ty1 >= map.height is ty1 = map.height - 1 end
+    let dw: f64 = (map.tile_w + 0.0) * cam.zoom
+    let dh: f64 = (map.tile_h + 0.0) * cam.zoom
+    let mut ty: int = ty0
+    while ty <= ty1 is
+        let mut tx: int = tx0
+        while tx <= tx1 is
+            let id: int = map.tiles[ty * map.width + tx]
+            if id > 0 && id <= palette.len() is
+                let sp: h2d_vec2::Vec2 = h2d_camera2d::to_screen(cam, h2d_vec2::vec2((tx * map.tile_w) + 0.0, (ty * map.tile_h) + 0.0))
+                h2d_gfx::draw_rectangle(sp.x, sp.y, dw + 0.5, dh + 0.5, palette[id - 1])
+            end
+            tx += 1
+        end
+        ty += 1
+    end
+end
