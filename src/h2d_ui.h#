@@ -1,0 +1,145 @@
+mod h2d_color
+mod h2d_gfx
+mod h2d_input2d
+mod h2d_keys
+mod h2d_vec2
+
+;; Immediate-mode UI for the pixel engine: call these every frame inside
+;; your draw code; they draw AND report interaction in the same call —
+;; there is no widget tree and no state to keep except your own values.
+;;
+;;   let th: h2d_ui::Theme = h2d_ui::default_theme()
+;;   if h2d_ui::button(th, 300.0, 200.0, 200.0, 40.0, "Start") is start_game() end
+;;   volume = h2d_ui::slider(th, 300.0, 260.0, 200.0, volume)
+;;
+;; Mouse coordinates honour h2d_gfx::set_logical_size. Text uses the
+;; theme's TrueType font when it is valid, otherwise the built-in bitmap font.
+
+pub struct Theme is
+    pub bg:        h2d_color::Color
+    pub hover:     h2d_color::Color
+    pub pressed:   h2d_color::Color
+    pub border:    h2d_color::Color
+    pub text:      h2d_color::Color
+    pub accent:    h2d_color::Color
+    pub font:      h2d_gfx::Font
+    pub text_size: int            ;; bitmap-font size (8, 16, 24...) when no TTF font
+    pub radius:    f64
+end
+
+pub fn default_theme() -> Theme is
+    return Theme {
+        bg: h2d_color::color_rgb(40, 44, 60), hover: h2d_color::color_rgb(62, 70, 100),
+        pressed: h2d_color::color_rgb(30, 90, 160), border: h2d_color::color_rgb(120, 130, 170),
+        text: h2d_color::white(), accent: h2d_color::color_rgb(80, 170, 255),
+        font: h2d_gfx::Font { handle: 0, size: 0 }, text_size: 16, radius: 6.0,
+    }
+end
+
+pub fn with_font(mut th: Theme, font: h2d_gfx::Font) -> Theme is
+    th.font = font
+    return th
+end
+
+fn text_width(th: Theme, s: string) -> f64 is
+    if h2d_gfx::is_font_valid(th.font) is
+        return h2d_gfx::measure_text_font(th.font, s) + 0.0
+    end
+    return h2d_gfx::measure_text(s, th.text_size) + 0.0
+end
+
+fn text_height(th: Theme) -> f64 is
+    if h2d_gfx::is_font_valid(th.font) is
+        return h2d_gfx::font_height(th.font) + 0.0
+    end
+    return th.text_size + 0.0
+end
+
+;; Text at (x, y) = top-left, in the theme's font and colour.
+pub fn text(th: Theme, s: string, x: f64, y: f64) is
+    if h2d_gfx::is_font_valid(th.font) is
+        h2d_gfx::draw_text_font(th.font, s, x, y, th.text)
+    else is
+        h2d_gfx::draw_text(s, x, y, th.text_size, th.text)
+    end
+end
+
+;; Text centred inside the rectangle.
+pub fn text_centered(th: Theme, s: string, x: f64, y: f64, w: f64, h: f64) is
+    text(th, s, x + (w - text_width(th, s)) / 2.0, y + (h - text_height(th)) / 2.0)
+end
+
+pub fn is_hovered(x: f64, y: f64, w: f64, h: f64) -> bool is
+    let m = h2d_input2d::mouse_position()
+    return m.0 >= x && m.0 < x + w && m.1 >= y && m.1 < y + h
+end
+
+pub fn panel(th: Theme, x: f64, y: f64, w: f64, h: f64) is
+    h2d_gfx::draw_rounded_rect(x, y, w, h, th.radius, th.bg)
+    h2d_gfx::draw_rounded_rect_lines(x, y, w, h, th.radius, th.border)
+end
+
+;; Draws a button; returns true on the frame the mouse button is RELEASED over it.
+pub fn button(th: Theme, x: f64, y: f64, w: f64, h: f64, label: string) -> bool is
+    let hot: bool = is_hovered(x, y, w, h)
+    let down: bool = hot && h2d_input2d::is_mouse_button_down(h2d_keys::mouse_left())
+    let mut fill: h2d_color::Color = th.bg
+    if hot is fill = th.hover end
+    if down is fill = th.pressed end
+    h2d_gfx::draw_rounded_rect(x, y, w, h, th.radius, fill)
+    h2d_gfx::draw_rounded_rect_lines(x, y, w, h, th.radius, if hot then th.accent else th.border)
+    text_centered(th, label, x, y, w, h)
+    return hot && h2d_input2d::is_mouse_button_released(h2d_keys::mouse_left())
+end
+
+;; Checkbox with a label to its right; returns the (possibly toggled) value.
+pub fn checkbox(th: Theme, x: f64, y: f64, label: string, value: bool) -> bool is
+    let box: f64 = 20.0
+    let w: f64 = box + 8.0 + text_width(th, label)
+    let hot: bool = is_hovered(x, y, w, box)
+    h2d_gfx::draw_rounded_rect(x, y, box, box, 3.0, if hot then th.hover else th.bg)
+    h2d_gfx::draw_rounded_rect_lines(x, y, box, box, 3.0, th.border)
+    if value is
+        h2d_gfx::draw_rectangle(x + 5.0, y + 5.0, box - 10.0, box - 10.0, th.accent)
+    end
+    text(th, label, x + box + 8.0, y + (box - text_height(th)) / 2.0)
+    if hot && h2d_input2d::is_mouse_button_pressed(h2d_keys::mouse_left()) is
+        return !value
+    end
+    return value
+end
+
+;; Horizontal slider, value in 0.0 .. 1.0. Drag anywhere on the bar.
+pub fn slider(th: Theme, x: f64, y: f64, w: f64, value: f64) -> f64 is
+    let h: f64 = 20.0
+    let mut v: f64 = value
+    if is_hovered(x - 6.0, y, w + 12.0, h) && h2d_input2d::is_mouse_button_down(h2d_keys::mouse_left()) is
+        v = h2d_vec2::clamp_f((h2d_input2d::mouse_x() - x) / w, 0.0, 1.0)
+    end
+    h2d_gfx::draw_rounded_rect(x, y + h / 2.0 - 3.0, w, 6.0, 3.0, th.bg)
+    h2d_gfx::draw_rounded_rect(x, y + h / 2.0 - 3.0, w * v, 6.0, 3.0, th.accent)
+    h2d_gfx::draw_circle(x + w * v, y + h / 2.0, 9.0, th.text)
+    return v
+end
+
+;; Filled bar, fraction 0.0 .. 1.0 (health, loading, cooldown).
+pub fn progress_bar(th: Theme, x: f64, y: f64, w: f64, h: f64, fraction: f64) is
+    let f: f64 = h2d_vec2::clamp_f(fraction, 0.0, 1.0)
+    h2d_gfx::draw_rounded_rect(x, y, w, h, th.radius, th.bg)
+    if f > 0.0 is
+        h2d_gfx::draw_rounded_rect(x, y, w * f, h, th.radius, th.accent)
+    end
+    h2d_gfx::draw_rounded_rect_lines(x, y, w, h, th.radius, th.border)
+end
+
+;; A vertical menu: draws `items` one under another, returns the index
+;; clicked this frame or -1.
+pub fn menu(th: Theme, x: f64, y: f64, w: f64, item_h: f64, gap: f64, items: [string]) -> int is
+    let mut clicked: int = 0 - 1
+    let mut i: int = 0
+    while i < items.len() is
+        if button(th, x, y + (i + 0.0) * (item_h + gap), w, item_h, items[i]) is clicked = i end
+        i += 1
+    end
+    return clicked
+end
