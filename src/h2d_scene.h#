@@ -1,0 +1,94 @@
+mod h2d_gfx
+mod h2d_color
+
+;; Game-state manager with fade transitions. Scenes are just integers you
+;; define (const MENU: int = 0, PLAY: int = 1, GAME_OVER: int = 2) and
+;; switch on in your main loop:
+;;
+;;   let mut sc: h2d_scene::Scenes = h2d_scene::new_scenes(MENU)
+;;   while ... is
+;;       sc = h2d_scene::update(sc, dt)
+;;       if sc.current == MENU is  ... if start_clicked is sc = h2d_scene::change(sc, PLAY) end
+;;       if h2d_scene::just_entered(sc) is reset_level() end
+;;       ...
+;;       h2d_scene::draw_fade(sc)       ;; last thing before next_frame()
+;;   end
+
+pub struct Scenes is
+    pub current:  int
+    pub pending:  int       ;; scene we are fading toward (-1 none)
+    pub alpha:    f64       ;; 0 = clear, 1 = fully black
+    pub phase:    int       ;; 0 idle, 1 fading out, 2 fading in
+    pub speed:    f64       ;; fade seconds each way
+    pub entered:  bool      ;; true for exactly one frame after a switch
+    pub time:     f64       ;; seconds since the current scene began
+end
+
+pub fn new_scenes(initial: int) -> Scenes is
+    return Scenes { current: initial, pending: 0 - 1, alpha: 0.0, phase: 0, speed: 0.25, entered: true, time: 0.0 }
+end
+
+pub fn set_fade_seconds(mut s: Scenes, seconds: f64) -> Scenes is
+    s.speed = seconds
+    return s
+end
+
+;; Start a transition (fade to black, switch, fade back in). Ignored while one is running.
+pub fn change(mut s: Scenes, next: int) -> Scenes is
+    if s.phase != 0 is return s end
+    s.pending = next
+    s.phase = 1
+    return s
+end
+
+;; Instant switch, no fade.
+pub fn jump_to(mut s: Scenes, next: int) -> Scenes is
+    s.current = next
+    s.pending = 0 - 1
+    s.phase = 0
+    s.alpha = 0.0
+    s.entered = true
+    s.time = 0.0
+    return s
+end
+
+pub fn is_transitioning(s: Scenes) -> bool is
+    return s.phase != 0
+end
+
+;; True for exactly one frame right after the scene changed — do level setup here.
+pub fn just_entered(s: Scenes) -> bool is
+    return s.entered
+end
+
+pub fn update(mut s: Scenes, dt: f64) -> Scenes is
+    s.entered = false
+    s.time += dt
+    let step: f64 = if s.speed > 0.0 then dt / s.speed else 1.0
+    if s.phase == 1 is
+        s.alpha += step
+        if s.alpha >= 1.0 is
+            s.alpha = 1.0
+            s.current = s.pending
+            s.pending = 0 - 1
+            s.phase = 2
+            s.entered = true
+            s.time = 0.0
+        end
+    elsif s.phase == 2 is
+        s.alpha -= step
+        if s.alpha <= 0.0 is
+            s.alpha = 0.0
+            s.phase = 0
+        end
+    end
+    return s
+end
+
+;; Black overlay over the whole screen with the current fade alpha.
+pub fn draw_fade(s: Scenes) is
+    if s.alpha > 0.0 is
+        let a: int = __builtin_conv_float_to_int(s.alpha * 255.0)
+        h2d_gfx::draw_rectangle(0.0, 0.0, h2d_gfx::screen_width() + 0.0, h2d_gfx::screen_height() + 0.0, h2d_color::color(0, 0, 0, a))
+    end
+end
