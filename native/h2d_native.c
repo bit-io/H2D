@@ -1,13 +1,67 @@
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_image.h>
+/* Audio is optional. These games make no sound, so by default SDL2_mixer is NOT
+ * linked (one runtime library less — a missing libSDL2_mixer.so used to stop the
+ * game from starting). Build with H2D_WITH_AUDIO=1 to get the real mixer. */
+#ifdef H2D_WITH_AUDIO
 #include <SDL2/SDL_mixer.h>
+#else
+typedef struct Mix_Chunk Mix_Chunk;
+typedef struct Mix_Music Mix_Music;
+#define MIX_DEFAULT_FORMAT 0
+#define MIX_MAX_VOLUME 128
+#pragma GCC diagnostic ignored "-Wunused-value"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#define Mix_OpenAudio(...)      (-1)
+#define Mix_CloseAudio()        ((void)0)
+#define Mix_AllocateChannels(n) (0)
+#define Mix_LoadWAV(p)          ((Mix_Chunk *)0)
+#define Mix_FreeChunk(c)        ((void)(c))
+#define Mix_PlayChannel(a, b, c) (-1)
+#define Mix_VolumeChunk(c, v)   (0)
+#define Mix_HaltChannel(c)      (0)
+#define Mix_Volume(c, v)        (0)
+#define Mix_SetPanning(c, l, r) (0)
+#define Mix_LoadMUS(p)          ((Mix_Music *)0)
+#define Mix_FreeMusic(m)        ((void)(m))
+#define Mix_PlayMusic(m, l)     (-1)
+#define Mix_FadeInMusic(m, l, ms) (-1)
+#define Mix_FadeOutMusic(ms)    (0)
+#define Mix_HaltMusic()         (0)
+#define Mix_PauseMusic()        ((void)0)
+#define Mix_ResumeMusic()       ((void)0)
+#define Mix_PlayingMusic()      (0)
+#define Mix_VolumeMusic(v)      (0)
+#define Mix_MasterVolume(v)     (0)
+#endif
 #include <SDL2/SDL2_gfxPrimitives.h>
-#include <SDL2/SDL_ttf.h>
 
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+
+/* ── image decoding + TrueType rasterising without SDL2_image / SDL2_ttf ──────
+ * stb_image / stb_image_write / stb_truetype (public domain, single headers next
+ * to this file) are compiled into the archive, so the game needs neither
+ * libSDL2_image.so nor libSDL2_ttf.so (nor freetype, png, jpeg, ...) at run time. */
+#include <math.h>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#pragma GCC diagnostic ignored "-Wmisleading-indentation"
+#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+#define STBI_NO_HDR
+#define STBI_NO_LINEAR
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "stb_truetype.h"
+#pragma GCC diagnostic pop
 
 /* ── fixed-size handle tables ──────────────────────────────────────── */
 
@@ -37,11 +91,145 @@ static int g_audio_ready = 0;
 #define H2D_TEXT_CACHE   128
 #define H2D_CHAR_QUEUE   64
 
-static TTF_Font *g_fonts[H2D_MAX_FONTS];
+typedef struct {
+    unsigned char *data;
+    stbtt_fontinfo info;
+    float scale;
+    int ascent, descent, line_gap, height;
+} H2dFont;
+static H2dFont *g_fonts[H2D_MAX_FONTS];
 static int       g_font_next = 1;
 
 typedef struct { int font; char *text; SDL_Texture *tex; int w, h; uint64_t used; } TextCacheEntry;
 static TextCacheEntry g_text_cache[H2D_TEXT_CACHE];
+
+/* ── stb-based loaders (replace IMG_Load / IMG_SavePNG) ─────────────── */
+/* PNG, JPEG, BMP, GIF, TGA, PSD ... -> RGBA32 surface (NULL on failure). */
+static SDL_Surface *h2d_img_load(const char *path) {
+    int w = 0, h = 0, n = 0;
+    unsigned char *px = stbi_load(path, &w, &h, &n, 4);
+    if (!px) return NULL;
+    SDL_Surface *surf = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_RGBA32);
+    if (!surf) { stbi_image_free(px); return NULL; }
+    for (int y = 0; y < h; y++)
+        memcpy((Uint8 *)surf->pixels + (size_t)y * surf->pitch, px + (size_t)y * w * 4, (size_t)w * 4);
+    stbi_image_free(px);
+    return surf;
+}
+
+/* ── TrueType (stb_truetype): load, measure, rasterise ──────────────── */
+/*H2D_FONT_BEGIN*/
+static int h2d_utf8_next(const unsigned char **pp) {
+    const unsigned char *p = *pp;
+    int c = *p;
+    if (c == 0) return 0;
+    int n = 1, cp = c;
+    if (c >= 0xF0 && (p[1] & 0xC0) == 0x80) { cp = c & 0x07; n = 4; }
+    else if (c >= 0xE0 && (p[1] & 0xC0) == 0x80) { cp = c & 0x0F; n = 3; }
+    else if (c >= 0xC0 && (p[1] & 0xC0) == 0x80) { cp = c & 0x1F; n = 2; }
+    for (int i = 1; i < n; i++) {
+        if ((p[i] & 0xC0) != 0x80) { *pp = p + 1; return '?'; }
+        cp = (cp << 6) | (p[i] & 0x3F);
+    }
+    *pp = p + n;
+    return cp;
+}
+
+static void h2d_font_free(H2dFont *f) {
+    if (!f) return;
+    free(f->data);
+    free(f);
+}
+
+static H2dFont *h2d_font_open(const char *path, int pt) {
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return NULL;
+    fseek(fp, 0, SEEK_END);
+    long len = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (len <= 0) { fclose(fp); return NULL; }
+    unsigned char *data = (unsigned char *)malloc((size_t)len);
+    if (!data || fread(data, 1, (size_t)len, fp) != (size_t)len) { free(data); fclose(fp); return NULL; }
+    fclose(fp);
+    H2dFont *f = (H2dFont *)calloc(1, sizeof(H2dFont));
+    if (!f) { free(data); return NULL; }
+    f->data = data;
+    int off = stbtt_GetFontOffsetForIndex(data, 0);
+    if (off < 0 || !stbtt_InitFont(&f->info, data, off)) { h2d_font_free(f); return NULL; }
+    f->scale = stbtt_ScaleForMappingEmToPixels(&f->info, (float)pt);
+    stbtt_GetFontVMetrics(&f->info, &f->ascent, &f->descent, &f->line_gap);
+    f->height = (int)ceilf((float)(f->ascent - f->descent) * f->scale) + 1;
+    return f;
+}
+
+static float h2d_font_text_width(H2dFont *f, const char *text) {
+    float x = 0.0f;
+    const unsigned char *p = (const unsigned char *)text;
+    int cp = h2d_utf8_next(&p);
+    while (cp) {
+        int adv = 0, lsb = 0;
+        stbtt_GetCodepointHMetrics(&f->info, cp, &adv, &lsb);
+        x += (float)adv * f->scale;
+        const unsigned char *q = p;
+        int next = h2d_utf8_next(&q);
+        if (next) x += (float)stbtt_GetCodepointKernAdvance(&f->info, cp, next) * f->scale;
+        cp = h2d_utf8_next(&p);
+    }
+    return x;
+}
+
+/* White text, coverage in the alpha channel: returns a malloc'ed RGBA32 buffer
+ * of *w_out x *h_out pixels, or NULL. */
+static unsigned char *h2d_font_render_rgba(H2dFont *f, const char *text, int *w_out, int *h_out) {
+    int w = (int)ceilf(h2d_font_text_width(f, text)) + 2;
+    int h = f->height;
+    if (w < 1 || h < 1) return NULL;
+    unsigned char *buf = (unsigned char *)malloc((size_t)w * (size_t)h * 4);
+    if (!buf) return NULL;
+    for (size_t i = 0; i < (size_t)w * (size_t)h; i++) {
+        buf[i * 4 + 0] = 255; buf[i * 4 + 1] = 255; buf[i * 4 + 2] = 255; buf[i * 4 + 3] = 0;
+    }
+    int base = (int)((float)f->ascent * f->scale + 0.5f);
+    float x = 0.0f;
+    const unsigned char *p = (const unsigned char *)text;
+    int cp = h2d_utf8_next(&p);
+    while (cp) {
+        int gi = stbtt_FindGlyphIndex(&f->info, cp);
+        int adv = 0, lsb = 0;
+        stbtt_GetGlyphHMetrics(&f->info, gi, &adv, &lsb);
+        int ix = (int)x;
+        float fx = x - (float)ix;
+        int x0, y0, x1, y1;
+        stbtt_GetGlyphBitmapBoxSubpixel(&f->info, gi, f->scale, f->scale, fx, 0.0f, &x0, &y0, &x1, &y1);
+        int gw = x1 - x0, gh = y1 - y0;
+        if (gw > 0 && gh > 0) {
+            unsigned char *g = (unsigned char *)calloc((size_t)gw * (size_t)gh, 1);
+            if (g) {
+                stbtt_MakeGlyphBitmapSubpixel(&f->info, g, gw, gh, gw, f->scale, f->scale, fx, 0.0f, gi);
+                for (int row = 0; row < gh; row++) {
+                    int dy = base + y0 + row;
+                    if (dy < 0 || dy >= h) continue;
+                    for (int col = 0; col < gw; col++) {
+                        int dx = ix + x0 + col;
+                        if (dx < 0 || dx >= w) continue;
+                        unsigned char a = g[row * gw + col];
+                        unsigned char *d = &buf[((size_t)dy * (size_t)w + (size_t)dx) * 4 + 3];
+                        if (a > *d) *d = a;
+                    }
+                }
+                free(g);
+            }
+        }
+        x += (float)adv * f->scale;
+        const unsigned char *q = p;
+        int next = h2d_utf8_next(&q);
+        if (next) x += (float)stbtt_GetCodepointKernAdvance(&f->info, cp, next) * f->scale;
+        cp = h2d_utf8_next(&p);
+    }
+    *w_out = w; *h_out = h;
+    return buf;
+}
+/*H2D_FONT_END*/
 
 static int g_logical_w = 0, g_logical_h = 0;
 static int g_blend = 1;                 /* 0 none, 1 alpha, 2 add, 3 mod */
@@ -246,8 +434,6 @@ int64_t h2d_init_window(int64_t width, int64_t height, const char *title) {
     g_font_next = 1; g_texture_next = 1; g_sound_next = 1; g_music_next = 1;
     g_frame_count = 0; g_logical_w = g_logical_h = 0; g_blend = 1;
     g_char_head = g_char_tail = 0;
-    IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG);
-    TTF_Init();
     {
         const char *mf = getenv("H2D_MAX_FRAMES");
         g_max_frames = mf ? (uint64_t)strtoull(mf, NULL, 10) : 0;
@@ -286,13 +472,11 @@ void h2d_close_window(void) {
     if (!g_window && !g_renderer) return; /* already closed: idempotent */
     h2d_text_cache_clear();
     for (int i = 0; i < H2D_MAX_FONTS; i++) {
-        if (g_fonts[i]) { TTF_CloseFont(g_fonts[i]); g_fonts[i] = NULL; }
+        if (g_fonts[i]) { h2d_font_free(g_fonts[i]); g_fonts[i] = NULL; }
     }
     for (int i = 0; i < H2D_MAX_PADS; i++) {
         if (g_pads[i]) { SDL_GameControllerClose(g_pads[i]); g_pads[i] = NULL; }
     }
-    TTF_Quit();
-    IMG_Quit();
     for (int i = 0; i < H2D_MAX_TEXTURES; i++) {
         if (g_textures[i]) { SDL_DestroyTexture(g_textures[i]); g_textures[i] = NULL; }
     }
@@ -576,12 +760,12 @@ static int h2d_texture_alloc_slot(void) {
     return 0;
 }
 
-/* Loads any format SDL_image supports (PNG, JPG, BMP, GIF, ...) — a
+/* Loads any format stb_image supports (PNG, JPG, BMP, GIF, ...) — a
  * real upgrade over H#'s std -> image, which only decodes uncompressed
  * 24-bit BMP. Returns 0 on failure. */
 int64_t h2d_load_texture(const char *path) {
     if (!g_renderer || !path) return 0;
-    SDL_Surface *surf = IMG_Load(path);
+    SDL_Surface *surf = h2d_img_load(path);
     if (!surf) return 0;
     SDL_Texture *tex = SDL_CreateTextureFromSurface(g_renderer, surf);
     int w = surf->w, h = surf->h;
@@ -872,7 +1056,7 @@ void h2d_set_relative_mouse(int64_t on) { SDL_SetRelativeMouseMode(on ? SDL_TRUE
 
 void h2d_set_window_icon(const char *path) {
     if (!g_window || !path) return;
-    SDL_Surface *s = IMG_Load(path);
+    SDL_Surface *s = h2d_img_load(path);
     if (!s) return;
     SDL_SetWindowIcon(g_window, s);
     SDL_FreeSurface(s);
@@ -1042,7 +1226,7 @@ int64_t h2d_load_font(const char *path, int64_t pt_size) {
     int slot = 0;
     for (int i = 1; i < H2D_MAX_FONTS; i++) { if (!g_fonts[i]) { slot = i; break; } }
     if (slot == 0) return 0;
-    TTF_Font *f = TTF_OpenFont(path, (int)pt_size);
+    H2dFont *f = h2d_font_open(path, (int)pt_size);
     if (!f) return 0;
     g_fonts[slot] = f;
     return slot;
@@ -1058,7 +1242,7 @@ void h2d_unload_font(int64_t handle) {
             memset(&g_text_cache[i], 0, sizeof(g_text_cache[i]));
         }
     }
-    TTF_CloseFont(g_fonts[h]);
+    h2d_font_free(g_fonts[h]);
     g_fonts[h] = NULL;
 }
 
@@ -1074,12 +1258,15 @@ static TextCacheEntry *h2d_text_lookup(int font, const char *text) {
     }
     TextCacheEntry *slot = &g_text_cache[oldest];
     if (slot->tex) { SDL_DestroyTexture(slot->tex); free(slot->text); memset(slot, 0, sizeof(*slot)); }
-    SDL_Color white = { 255, 255, 255, 255 };
-    SDL_Surface *surf = TTF_RenderUTF8_Blended(g_fonts[font], text, white);
-    if (!surf) return NULL;
+    int tw = 0, th = 0;
+    unsigned char *rgba = h2d_font_render_rgba(g_fonts[font], text, &tw, &th);
+    if (!rgba) return NULL;
+    SDL_Surface *surf = SDL_CreateRGBSurfaceWithFormatFrom(rgba, tw, th, 32, tw * 4, SDL_PIXELFORMAT_RGBA32);
+    if (!surf) { free(rgba); return NULL; }
     slot->tex = SDL_CreateTextureFromSurface(g_renderer, surf);
-    slot->w = surf->w; slot->h = surf->h;
+    slot->w = tw; slot->h = th;
     SDL_FreeSurface(surf);
+    free(rgba);
     if (!slot->tex) { memset(slot, 0, sizeof(*slot)); return NULL; }
     SDL_SetTextureBlendMode(slot->tex, SDL_BLENDMODE_BLEND);
     slot->text = strdup(text);
@@ -1100,16 +1287,15 @@ void h2d_draw_text_font(int64_t font, const char *text, double x, double y, int6
 }
 
 int64_t h2d_measure_text_font(int64_t font, const char *text) {
-    int f = (int)font, w = 0, h = 0;
+    int f = (int)font;
     if (!text || f <= 0 || f >= H2D_MAX_FONTS || !g_fonts[f]) return 0;
-    TTF_SizeUTF8(g_fonts[f], text, &w, &h);
-    return w;
+    return (int64_t)ceilf(h2d_font_text_width(g_fonts[f], text));
 }
 
 int64_t h2d_font_height(int64_t font) {
     int f = (int)font;
     if (f <= 0 || f >= H2D_MAX_FONTS || !g_fonts[f]) return 0;
-    return TTF_FontHeight(g_fonts[f]);
+    return g_fonts[f]->height;
 }
 
 /* ── audio ──────────────────────────────────────────────────────────── */
@@ -1174,11 +1360,14 @@ static int h2d_save_png(const char *path) {
     if (!g_renderer || !path) return 0;
     int w = 0, h = 0;
     if (SDL_GetRendererOutputSize(g_renderer, &w, &h) != 0 || w <= 0 || h <= 0) return 0;
-    SDL_Surface *surf = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_ARGB8888);
+    SDL_Surface *surf = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_RGBA32);
     if (!surf) return 0;
     int ok = 0;
-    if (SDL_RenderReadPixels(g_renderer, NULL, SDL_PIXELFORMAT_ARGB8888, surf->pixels, surf->pitch) == 0)
-        ok = (IMG_SavePNG(surf, path) == 0);
+    if (SDL_RenderReadPixels(g_renderer, NULL, SDL_PIXELFORMAT_RGBA32, surf->pixels, surf->pitch) == 0) {
+        for (int y = 0; y < h; y++)                       /* opaque screenshot */
+            for (int x = 0; x < w; x++) ((Uint8 *)surf->pixels)[(size_t)y * surf->pitch + (size_t)x * 4 + 3] = 255;
+        ok = (stbi_write_png(path, w, h, 4, surf->pixels, surf->pitch) != 0);
+    }
     SDL_FreeSurface(surf);
     return ok;
 }
