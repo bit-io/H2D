@@ -91,7 +91,7 @@ end
 
 ;; ── 0.3.0: flips + source rect in one call, filtering, render targets ──
 
-extern dynamic [c, "h2d_native"] is
+extern static [c, "h2d_native"] is
     fn h2d_draw_texture_full(handle: int, src_x: f64, src_y: f64, src_w: f64, src_h: f64, x: f64, y: f64, dst_w: f64, dst_h: f64, rotation_deg: f64, origin_x: f64, origin_y: f64, flip_h: int, flip_v: int, r: int, g: int, b: int, a: int)
     fn h2d_set_texture_filter(linear: int)
     fn h2d_create_render_texture(width: int, height: int) -> int
