@@ -1,4 +1,5 @@
 mod h2d_color
+mod h2d_syslibs
 
 ;; H2D's real graphics backend: an actual OS window with GPU-accelerated
 ;; 2D rendering, PNG/JPG textures, and a frame loop — as opposed to
@@ -18,9 +19,9 @@ mod h2d_color
 ;; a well-worn, easy-to-teach shape for an immediate-mode 2D engine —
 ;; not a source dependency, just a familiar naming convention.
 
-;; System libraries the native backend needs. `extern static [c, "<pkg>"]`
-;; makes h# resolve them through pkg-config (bit never allows `extern dynamic`).
-;; Declared before the h2d_native block so the linker sees the archive first.
+;; The SDL2 add-on libraries (gfx, ttf, image, ...) are merged into libh2d_native.a by
+;; native/build.sh; what is still linked as a shared library is declared in the generated
+;; module h2d_syslibs (extern static [c, "<pkg>"] blocks, resolved through pkg-config).
 extern static [c, "h2d_native"] is
     fn h2d_init_window(width: int, height: int, title: string) -> int
     fn h2d_window_should_close() -> int
@@ -160,7 +161,7 @@ pub fn measure_text(text: string, size: int) -> int is
     return h2d_measure_text(text, size)
 end
 
-extern dynamic [c, "h2d_native"] is
+extern static [c, "h2d_native"] is
     fn h2d_set_window_size(w: int, h: int)
     fn h2d_set_window_min_size(w: int, h: int)
     fn h2d_set_fullscreen(on: int)
@@ -320,16 +321,4 @@ end
 
 pub fn font_height(f: Font) -> int is
     return h2d_font_height(f.handle)
-end
-
-;; pkg-config packages pulled in transitively by libh2d_native.a
-extern dynamic [c, "sdl2"] is
-end
-extern dynamic [c, "SDL2_image"] is
-end
-extern dynamic [c, "SDL2_mixer"] is
-end
-extern dynamic [c, "SDL2_gfx"] is
-end
-extern dynamic [c, "SDL2_ttf"] is
 end
