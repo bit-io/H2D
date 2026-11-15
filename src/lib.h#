@@ -44,6 +44,7 @@ mod h2d_anim
 mod h2d_audio
 mod h2d_pathfind
 mod h2d_menu
+mod h2d_syslibs
 
 pub fn version() -> string is
     return "0.3.0"
