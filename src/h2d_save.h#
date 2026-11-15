@@ -124,5 +124,8 @@ pub fn commit(sv: Save) -> bool is
         out = out + sv.keys[i] + "=" + sv.vals[i] + "\n"
         i += 1
     end
-    return fs::write(sv.path, out)
+    ;; fs::write returns bool in some std builds and nothing in others: call it
+    ;; as a statement and report success by checking the file afterwards.
+    fs::write(sv.path, out)
+    return fs::exists(sv.path)
 end
