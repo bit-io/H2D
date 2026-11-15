@@ -80,7 +80,7 @@ end
 
 ;; ── 0.3.0: released/delta, typed text, any-key, gamepad, actions ────────
 
-extern dynamic [c, "h2d_native"] is
+extern static [c, "h2d_native"] is
     fn h2d_mouse_dx() -> f64
     fn h2d_mouse_dy() -> f64
     fn h2d_is_mouse_button_released(button: int) -> int
