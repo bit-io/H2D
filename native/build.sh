@@ -74,7 +74,7 @@ rm -f build/libh2d_native.a
   echo 'end'
   for p in "${SHARED_PKGS[@]:-}"; do [ -n "$p" ] && printf 'extern static [c, "%s"] is\nend\n' "$p"; done
   for l in $(printf '%s\n' "${SHARED_LIBS[@]:-}" | sort -u); do [ -n "$l" ] && printf 'extern static [c, "%s"] is\nend\n' "$l"; done
-} > ../src/h2d_syslibs.h#
+} > src/h2d_syslibs.h#
 
 echo "built build/libh2d_native.a"
 echo "  statically merged : ${MERGED[*]:-none}  (+ ${#ARCHIVES[@]} archives)"
