@@ -90,7 +90,7 @@ end
 
 ;; ── 0.3.0: unloading, panning, fades, master volume ──────────────────
 
-extern dynamic [c, "h2d_native"] is
+extern static [c, "h2d_native"] is
     fn h2d_unload_sound(handle: int)
     fn h2d_unload_music(handle: int)
     fn h2d_play_sound_ex(handle: int, volume: f64, pan: f64, do_loop: int) -> int
